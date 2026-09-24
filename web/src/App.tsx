@@ -1,26 +1,34 @@
 import { useEffect } from "react";
-import { useHealthStore } from "./store/health";
+import { Navigate, Route, Routes } from "react-router-dom";
+import { useAuthStore } from "@/store/auth";
+import { LoginPage } from "@/pages/LoginPage";
+import { DashboardPage } from "@/pages/DashboardPage";
 
-// Minimal health page. shadcn/ui + real dashboard views are added by owner C.
+function RequireAuth({ children }: { children: JSX.Element }) {
+  const accessToken = useAuthStore((s) => s.accessToken);
+  if (!accessToken) return <Navigate to="/login" replace />;
+  return children;
+}
+
 export function App() {
-  const { status, detail, checkHealth } = useHealthStore();
+  const hydrate = useAuthStore((s) => s.hydrate);
 
   useEffect(() => {
-    checkHealth();
-  }, [checkHealth]);
+    hydrate();
+  }, [hydrate]);
 
   return (
-    <main style={{ fontFamily: "system-ui", padding: 32 }}>
-      <h1>Syncattend — Professor Dashboard</h1>
-      <p>Web skeleton (owner C). Reads the API contract from <code>../contracts/</code>.</p>
-      <section style={{ marginTop: 16 }}>
-        <strong>Backend health:</strong>{" "}
-        <span data-testid="health-status">{status}</span>
-        {detail && <span> — {detail}</span>}
-      </section>
-      <button style={{ marginTop: 16 }} onClick={() => checkHealth()}>
-        Re-check
-      </button>
-    </main>
+    <Routes>
+      <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/"
+        element={
+          <RequireAuth>
+            <DashboardPage />
+          </RequireAuth>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
