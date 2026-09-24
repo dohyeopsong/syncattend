@@ -109,9 +109,21 @@ best-effort heuristic.
 need changing; the slot map, framing, and robust decode are band-agnostic.
 
 ### Real-device checklist (still TODO — needs hardware)
-- [ ] Loopback: C's emitter (speaker) → this app (mic) at 1 m, quiet room.
-- [ ] Classroom distance sweep (front row / mid / back) + ambient chatter.
+Use the on-device harness `AudioLoopbackHarnessScreen`
+(`lib/features/attendance/audio_loopback_harness_screen.dart`) to measure the
+real acoustic path (physical speaker → air → mic) — this cannot be automated in
+CI. It reuses the same `AudioCaptureService`/decoder as attendance (no new
+dependency). Steps: enter the expected nonce → start → have owner C's emitter
+play the 18–20 kHz frames → read the live success rate → record it below.
+
+- [ ] Loopback: C's emitter (speaker) → this app (mic) at 1 m, quiet room. Rate: ____%
+- [ ] Classroom distance sweep (front row / mid / back) + ambient chatter. Rate: ____%
 - [ ] Record measured success rate here per distance/noise condition.
+- NOTE (this environment): only macOS-desktop / Chrome run targets are available
+  (no Android/iOS emulator or device, no mic entitlement), so physical loopback
+  numbers are pending a hardware run; the software DSP spike above stands in for
+  the automated portion.
+
 
 
 ## Contract gaps to report to Owner A
