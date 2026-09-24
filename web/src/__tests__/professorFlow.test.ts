@@ -41,6 +41,14 @@ function makeBackend() {
         id: "course-1",
         professor_id: "prof-1",
         name: b.name,
+        code: b.code ?? null,
+        department: b.department ?? null,
+        professor_name: b.professor_name ?? null,
+        day_of_week: b.day_of_week ?? null,
+        start_period: b.start_period ?? null,
+        end_period: b.end_period ?? null,
+        location: b.location ?? null,
+        credits: b.credits ?? null,
         created_at: "2026-09-25T00:00:00Z",
       },
     }),
@@ -51,10 +59,36 @@ function makeBackend() {
           id: "course-1",
           professor_id: "prof-1",
           name: "소프트웨어공학",
+          code: "SW3001",
+          department: "소프트웨어학과",
+          professor_name: "홍길동",
+          day_of_week: 1,
+          start_period: 1,
+          end_period: 3,
+          location: "공학관 401",
+          credits: 3,
           created_at: "2026-09-25T00:00:00Z",
         },
       ],
     }),
+    "PATCH /courses/course-1": (b) => ({
+      status: 200,
+      json: {
+        id: "course-1",
+        professor_id: "prof-1",
+        name: b.name ?? "소프트웨어공학",
+        code: b.code ?? "SW3001",
+        department: b.department ?? "소프트웨어학과",
+        professor_name: b.professor_name ?? "홍길동",
+        day_of_week: b.day_of_week ?? 1,
+        start_period: b.start_period ?? 1,
+        end_period: b.end_period ?? 3,
+        location: b.location ?? "공학관 401",
+        credits: b.credits ?? 3,
+        created_at: "2026-09-25T00:00:00Z",
+      },
+    }),
+    "DELETE /courses/course-1": () => ({ status: 204, json: null }),
     "POST /courses/course-1/enrollments": (b) => ({
       status: 201,
       json: { course_id: "course-1", student_id: b.student_id },
@@ -162,6 +196,9 @@ function installFetch(backend: ReturnType<typeof makeBackend>) {
     }
     const body = init?.body ? JSON.parse(init.body as string) : {};
     const { status, json } = handler(body);
+    if (status === 204) {
+      return new Response(null, { status: 204 });
+    }
     return new Response(JSON.stringify(json), {
       status,
       headers: { "Content-Type": "application/json" },
@@ -203,10 +240,13 @@ describe("professor happy-path E2E (web client + stores)", () => {
     expect(api.getAccessToken()).toBe("acc.jwt");
 
     // create + list course
-    const course = await useCoursesStore.getState().addCourse("소프트웨어공학");
+    const course = await useCoursesStore
+      .getState()
+      .addCourse({ name: "소프트웨어공학" });
     expect(course?.id).toBe("course-1");
     await useCoursesStore.getState().fetchCourses();
     expect(useCoursesStore.getState().courses).toHaveLength(1);
+    expect(useCoursesStore.getState().courses[0].code).toBe("SW3001");
 
     // enroll + list enrollments
     const enrolled = await useCoursesStore.getState().enroll("course-1", "stu-1");
@@ -285,5 +325,69 @@ describe("rejection reasons surface as errors", () => {
     const token = await api.getSessionToken("sess-1");
     expect(token.window_open).toBe(false);
     expect(token.window_remaining).toBe(0);
+  });
+});
+
+describe("course management CRUD (web client + store)", () => {
+  it("adds a course with schedule fields", async () => {
+    installFetch(makeBackend());
+    const created = await useCoursesStore.getState().addCourse({
+      name: "자료구조",
+      code: "SW2001",
+      department: "소프트웨어학과",
+      professor_name: "김교수",
+      day_of_week: 3,
+      start_period: 4,
+      end_period: 6,
+      location: "공학관 302",
+      credits: 3,
+    });
+    expect(created?.id).toBe("course-1");
+    // mock echoes payload → schedule fields round-trip through the client
+    expect(created?.code).toBe("SW2001");
+    expect(created?.day_of_week).toBe(3);
+    expect(created?.start_period).toBe(4);
+    expect(created?.credits).toBe(3);
+    expect(useCoursesStore.getState().courses).toHaveLength(1);
+  });
+
+  it("updates a course via PATCH and replaces it in the store", async () => {
+    installFetch(makeBackend());
+    await useCoursesStore.getState().fetchCourses();
+    expect(useCoursesStore.getState().courses[0].location).toBe("공학관 401");
+
+    const updated = await useCoursesStore
+      .getState()
+      .updateCourse("course-1", { location: "공학관 505", credits: 2 });
+    expect(updated?.location).toBe("공학관 505");
+    expect(updated?.credits).toBe(2);
+    // store reflects the patched course (same id, new fields)
+    const inStore = useCoursesStore.getState().courses.find((c) => c.id === "course-1");
+    expect(inStore?.location).toBe("공학관 505");
+    expect(inStore?.credits).toBe(2);
+    expect(useCoursesStore.getState().courses).toHaveLength(1);
+  });
+
+  it("deletes a course (DELETE 204) and removes it from the store", async () => {
+    installFetch(makeBackend());
+    await useCoursesStore.getState().fetchCourses();
+    expect(useCoursesStore.getState().courses).toHaveLength(1);
+
+    const ok = await useCoursesStore.getState().deleteCourse("course-1");
+    expect(ok).toBe(true);
+    expect(useCoursesStore.getState().courses).toHaveLength(0);
+    expect(useCoursesStore.getState().error).toBeNull();
+  });
+
+  it("surfaces a delete failure as a store error and keeps the course", async () => {
+    // backend with no DELETE route → 404 → store error, course retained
+    const backend = makeBackend();
+    delete backend.routes["DELETE /courses/course-1"];
+    installFetch(backend);
+    await useCoursesStore.getState().fetchCourses();
+    const ok = await useCoursesStore.getState().deleteCourse("course-1");
+    expect(ok).toBe(false);
+    expect(useCoursesStore.getState().error).toBeTruthy();
+    expect(useCoursesStore.getState().courses).toHaveLength(1);
   });
 });

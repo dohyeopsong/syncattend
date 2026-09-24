@@ -15,12 +15,39 @@ export interface LoginRequest {
   password: string;
 }
 
+// day_of_week: 1=Mon … 7=Sun (ISO-8601 weekday), null when unscheduled.
+export type DayOfWeek = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
 export interface Course {
   id: string;
   professor_id: string;
   name: string;
+  code: string | null;
+  department: string | null;
+  professor_name: string | null;
+  day_of_week: DayOfWeek | null;
+  start_period: number | null;
+  end_period: number | null;
+  location: string | null;
+  credits: number | null;
   created_at: string;
 }
+
+// name required; schedule fields optional. Mirrors CreateCourseRequest.
+export interface CreateCourseRequest {
+  name: string;
+  code?: string | null;
+  department?: string | null;
+  professor_name?: string | null;
+  day_of_week?: DayOfWeek | null;
+  start_period?: number | null;
+  end_period?: number | null;
+  location?: string | null;
+  credits?: number | null;
+}
+
+// PATCH — every field optional (partial update). Mirrors UpdateCourseRequest.
+export type UpdateCourseRequest = Partial<CreateCourseRequest>;
 
 export interface Enrollment {
   course_id: string;

@@ -1,11 +1,18 @@
 import { create } from "zustand";
 import {
   createCourse as apiCreateCourse,
+  deleteCourse as apiDeleteCourse,
   enrollStudent as apiEnroll,
   listCourses as apiListCourses,
   listEnrollments as apiListEnrollments,
+  updateCourse as apiUpdateCourse,
 } from "@/api/client";
-import type { Course, Enrollment } from "@/api/types";
+import type {
+  Course,
+  CreateCourseRequest,
+  Enrollment,
+  UpdateCourseRequest,
+} from "@/api/types";
 
 interface CoursesState {
   courses: Course[];
@@ -13,7 +20,12 @@ interface CoursesState {
   loading: boolean;
   error: string | null;
   fetchCourses: () => Promise<void>;
-  addCourse: (name: string) => Promise<Course | null>;
+  addCourse: (payload: CreateCourseRequest) => Promise<Course | null>;
+  updateCourse: (
+    courseId: string,
+    payload: UpdateCourseRequest,
+  ) => Promise<Course | null>;
+  deleteCourse: (courseId: string) => Promise<boolean>;
   fetchEnrollments: (courseId: string) => Promise<void>;
   enroll: (courseId: string, studentId: string) => Promise<boolean>;
 }
@@ -38,15 +50,45 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
     }
   },
 
-  addCourse: async (name) => {
+  addCourse: async (payload) => {
     set({ error: null });
     try {
-      const course = await apiCreateCourse(name);
+      const course = await apiCreateCourse(payload);
       set({ courses: [...get().courses, course] });
       return course;
     } catch (e) {
       set({ error: toMessage(e) });
       return null;
+    }
+  },
+
+  updateCourse: async (courseId, payload) => {
+    set({ error: null });
+    try {
+      const updated = await apiUpdateCourse(courseId, payload);
+      set({
+        courses: get().courses.map((c) => (c.id === courseId ? updated : c)),
+      });
+      return updated;
+    } catch (e) {
+      set({ error: toMessage(e) });
+      return null;
+    }
+  },
+
+  deleteCourse: async (courseId) => {
+    set({ error: null });
+    try {
+      await apiDeleteCourse(courseId);
+      const { [courseId]: _removed, ...restEnrollments } = get().enrollments;
+      set({
+        courses: get().courses.filter((c) => c.id !== courseId),
+        enrollments: restEnrollments,
+      });
+      return true;
+    } catch (e) {
+      set({ error: toMessage(e) });
+      return false;
     }
   },
 

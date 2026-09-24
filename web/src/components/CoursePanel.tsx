@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useCoursesStore } from "@/store/courses";
 import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardContent,
@@ -11,13 +12,227 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { BookOpen, Play, Plus } from "lucide-react";
+import type {
+  Course,
+  CreateCourseRequest,
+  DayOfWeek,
+  UpdateCourseRequest,
+} from "@/api/types";
+import { BookOpen, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 
-// Course picker + "open session" trigger. Opening a session starts screen (a).
+// day_of_week: 1=Mon … 7=Sun (ISO-8601 weekday).
+const DAY_LABELS: Record<DayOfWeek, string> = {
+  1: "월",
+  2: "화",
+  3: "수",
+  4: "목",
+  5: "금",
+  6: "토",
+  7: "일",
+};
+
+const DAY_OPTIONS: DayOfWeek[] = [1, 2, 3, 4, 5, 6, 7];
+
+// Editable schedule fields shared by the add + edit forms (all strings for
+// controlled inputs; converted to typed payload on submit).
+interface CourseForm {
+  name: string;
+  code: string;
+  department: string;
+  professor_name: string;
+  day_of_week: string; // "" | "1".."7"
+  start_period: string;
+  end_period: string;
+  location: string;
+  credits: string;
+}
+
+const EMPTY_FORM: CourseForm = {
+  name: "",
+  code: "",
+  department: "",
+  professor_name: "",
+  day_of_week: "",
+  start_period: "",
+  end_period: "",
+  location: "",
+  credits: "",
+};
+
+function courseToForm(c: Course): CourseForm {
+  return {
+    name: c.name ?? "",
+    code: c.code ?? "",
+    department: c.department ?? "",
+    professor_name: c.professor_name ?? "",
+    day_of_week: c.day_of_week != null ? String(c.day_of_week) : "",
+    start_period: c.start_period != null ? String(c.start_period) : "",
+    end_period: c.end_period != null ? String(c.end_period) : "",
+    location: c.location ?? "",
+    credits: c.credits != null ? String(c.credits) : "",
+  };
+}
+
+// Empty string → null; numeric strings → number. Keeps optional fields sparse.
+function formToPayload(f: CourseForm): CreateCourseRequest {
+  const str = (v: string) => (v.trim() === "" ? null : v.trim());
+  const num = (v: string) => (v.trim() === "" ? null : Number(v));
+  const day = f.day_of_week.trim() === "" ? null : (Number(f.day_of_week) as DayOfWeek);
+  return {
+    name: f.name.trim(),
+    code: str(f.code),
+    department: str(f.department),
+    professor_name: str(f.professor_name),
+    day_of_week: day,
+    start_period: num(f.start_period),
+    end_period: num(f.end_period),
+    location: str(f.location),
+    credits: num(f.credits),
+  };
+}
+
+function scheduleLabel(c: Course): string {
+  if (c.day_of_week == null && c.start_period == null) return "—";
+  const day = c.day_of_week != null ? DAY_LABELS[c.day_of_week] : "";
+  let periods = "";
+  if (c.start_period != null) {
+    periods =
+      c.end_period != null && c.end_period !== c.start_period
+        ? `${c.start_period}–${c.end_period}교시`
+        : `${c.start_period}교시`;
+  }
+  return [day, periods].filter(Boolean).join(" ") || "—";
+}
+
+// Shared add/edit form fields.
+function CourseFields({
+  form,
+  setForm,
+}: {
+  form: CourseForm;
+  setForm: (f: CourseForm) => void;
+}) {
+  const upd = (patch: Partial<CourseForm>) => setForm({ ...form, ...patch });
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      <div className="col-span-2 space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          강좌명 <span className="text-destructive">*</span>
+        </label>
+        <Input
+          placeholder="예: 소프트웨어공학"
+          value={form.name}
+          onChange={(e) => upd({ name: e.target.value })}
+          required
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          학수번호
+        </label>
+        <Input
+          placeholder="SW3001"
+          value={form.code}
+          onChange={(e) => upd({ code: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          학과
+        </label>
+        <Input
+          placeholder="소프트웨어학과"
+          value={form.department}
+          onChange={(e) => upd({ department: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          담당교수
+        </label>
+        <Input
+          placeholder="홍길동"
+          value={form.professor_name}
+          onChange={(e) => upd({ professor_name: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          요일
+        </label>
+        <select
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          value={form.day_of_week}
+          onChange={(e) => upd({ day_of_week: e.target.value })}
+        >
+          <option value="">미지정</option>
+          {DAY_OPTIONS.map((d) => (
+            <option key={d} value={d}>
+              {DAY_LABELS[d]}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          시작 교시
+        </label>
+        <Input
+          type="number"
+          min={1}
+          max={15}
+          placeholder="1"
+          value={form.start_period}
+          onChange={(e) => upd({ start_period: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          종료 교시
+        </label>
+        <Input
+          type="number"
+          min={1}
+          max={15}
+          placeholder="3"
+          value={form.end_period}
+          onChange={(e) => upd({ end_period: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          강의실
+        </label>
+        <Input
+          placeholder="공학관 401"
+          value={form.location}
+          onChange={(e) => upd({ location: e.target.value })}
+        />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          학점
+        </label>
+        <Input
+          type="number"
+          min={0}
+          max={9}
+          placeholder="3"
+          value={form.credits}
+          onChange={(e) => upd({ credits: e.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
+
+// Course picker + CRUD + "open session" trigger. Opening a session starts screen (a).
 export function CoursePanel() {
   const courses = useCoursesStore((s) => s.courses);
   const fetchCourses = useCoursesStore((s) => s.fetchCourses);
   const addCourse = useCoursesStore((s) => s.addCourse);
+  const updateCourse = useCoursesStore((s) => s.updateCourse);
+  const deleteCourse = useCoursesStore((s) => s.deleteCourse);
   const coursesError = useCoursesStore((s) => s.error);
 
   const session = useSessionStore((s) => s.session);
@@ -26,8 +241,18 @@ export function CoursePanel() {
   const resetAttendance = useAttendanceStore((s) => s.reset);
 
   const [selected, setSelected] = useState<string>("");
-  const [newName, setNewName] = useState("");
   const [windowSeconds, setWindowSeconds] = useState(60);
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState<CourseForm>(EMPTY_FORM);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<CourseForm>(EMPTY_FORM);
+  const [busy, setBusy] = useState(false);
+
+  const selectedCourse = useMemo(
+    () => courses.find((c) => c.id === selected),
+    [courses, selected],
+  );
 
   useEffect(() => {
     void fetchCourses();
@@ -39,12 +264,42 @@ export function CoursePanel() {
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
-    if (!newName.trim()) return;
-    const c = await addCourse(newName.trim());
+    if (!addForm.name.trim()) return;
+    setBusy(true);
+    const c = await addCourse(formToPayload(addForm));
+    setBusy(false);
     if (c) {
-      setNewName("");
+      setAddForm(EMPTY_FORM);
+      setShowAdd(false);
       setSelected(c.id);
     }
+  }
+
+  function startEdit(c: Course) {
+    setEditingId(c.id);
+    setEditForm(courseToForm(c));
+  }
+
+  async function onSaveEdit(e: FormEvent) {
+    e.preventDefault();
+    if (!editingId || !editForm.name.trim()) return;
+    setBusy(true);
+    const payload: UpdateCourseRequest = formToPayload(editForm);
+    const updated = await updateCourse(editingId, payload);
+    setBusy(false);
+    if (updated) setEditingId(null);
+  }
+
+  async function onDelete(c: Course) {
+    // Irreversible — require explicit confirmation.
+    const ok = window.confirm(
+      `강좌 "${c.name}"을(를) 삭제하시겠습니까?\n삭제 후에는 되돌릴 수 없습니다.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    const done = await deleteCourse(c.id);
+    setBusy(false);
+    if (done && selected === c.id) setSelected("");
   }
 
   async function onOpen() {
@@ -57,30 +312,151 @@ export function CoursePanel() {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          <BookOpen className="h-5 w-5" /> 강좌 & 세션
+          <BookOpen className="h-5 w-5" /> 강좌 관리 & 세션
         </CardTitle>
         <CardDescription>
-          강좌를 선택하고 인증 창(기본 60초)을 열어 세션을 시작하세요.
+          강좌를 추가·수정·삭제하고, 강좌를 선택해 인증 창(기본 60초)을 열어
+          세션을 시작하세요.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* ---- course list ---- */}
         <div className="space-y-2">
-          <label className="text-sm font-medium">강좌 선택</label>
-          <select
-            className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            value={selected}
-            onChange={(e) => setSelected(e.target.value)}
-          >
-            {courses.length === 0 && <option value="">강좌 없음</option>}
-            {courses.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-medium">강좌 목록</label>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                setShowAdd((v) => !v);
+                setAddForm(EMPTY_FORM);
+              }}
+            >
+              {showAdd ? (
+                <>
+                  <X className="h-4 w-4" /> 닫기
+                </>
+              ) : (
+                <>
+                  <Plus className="h-4 w-4" /> 강좌 추가
+                </>
+              )}
+            </Button>
+          </div>
+
+          {courses.length === 0 && !showAdd && (
+            <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+              등록된 강좌가 없습니다. “강좌 추가”로 시작하세요.
+            </p>
+          )}
+
+          <ul className="divide-y rounded-md border">
+            {courses.map((c) => {
+              const isSelected = c.id === selected;
+              const isEditing = c.id === editingId;
+              return (
+                <li key={c.id} className="p-3">
+                  {isEditing ? (
+                    <form onSubmit={onSaveEdit} className="space-y-3">
+                      <CourseFields form={editForm} setForm={setEditForm} />
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setEditingId(null)}
+                          disabled={busy}
+                        >
+                          취소
+                        </Button>
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={busy || !editForm.name.trim()}
+                        >
+                          저장
+                        </Button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="flex items-start justify-between gap-3">
+                      <button
+                        type="button"
+                        className="flex-1 text-left"
+                        onClick={() => setSelected(c.id)}
+                        aria-pressed={isSelected}
+                      >
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium">{c.name}</span>
+                          {isSelected && (
+                            <Badge variant="default">선택됨</Badge>
+                          )}
+                          {c.code && (
+                            <Badge variant="outline">{c.code}</Badge>
+                          )}
+                        </div>
+                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                          {c.department && <span>{c.department}</span>}
+                          <span>{scheduleLabel(c)}</span>
+                          {c.location && <span>{c.location}</span>}
+                          {c.credits != null && <span>{c.credits}학점</span>}
+                          {c.professor_name && <span>{c.professor_name}</span>}
+                        </div>
+                      </button>
+                      <div className="flex shrink-0 gap-1">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label="강좌 수정"
+                          onClick={() => startEdit(c)}
+                          disabled={busy}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          aria-label="강좌 삭제"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => void onDelete(c)}
+                          disabled={busy}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
         </div>
 
-        <div className="flex items-end gap-2">
+        {/* ---- add form ---- */}
+        {showAdd && (
+          <form
+            onSubmit={onCreate}
+            className="space-y-3 rounded-md border border-dashed p-3"
+          >
+            <p className="text-sm font-medium">새 강좌 추가</p>
+            <CourseFields form={addForm} setForm={setAddForm} />
+            <div className="flex justify-end">
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={busy || !addForm.name.trim()}
+              >
+                <Plus className="h-4 w-4" /> 추가
+              </Button>
+            </div>
+          </form>
+        )}
+
+        {/* ---- session open ---- */}
+        <div className="flex items-end gap-2 border-t pt-4">
           <div className="flex-1 space-y-2">
             <label className="text-sm font-medium">인증 창 (초)</label>
             <Input
@@ -96,7 +472,8 @@ export function CoursePanel() {
             disabled={!selected || session?.status === "open"}
             onClick={() => void onOpen()}
           >
-            <Play className="h-4 w-4" /> 세션 열기
+            <Play className="h-4 w-4" />
+            {selectedCourse ? `“${selectedCourse.name}” 세션 열기` : "세션 열기"}
           </Button>
         </div>
 
@@ -112,20 +489,6 @@ export function CoursePanel() {
             현재 세션 화면 초기화
           </Button>
         )}
-
-        <form onSubmit={onCreate} className="flex items-end gap-2 border-t pt-4">
-          <div className="flex-1 space-y-2">
-            <label className="text-sm font-medium">새 강좌 추가</label>
-            <Input
-              placeholder="예: 소프트웨어공학 (월 9:00)"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-            />
-          </div>
-          <Button type="submit" variant="outline">
-            <Plus className="h-4 w-4" /> 추가
-          </Button>
-        </form>
 
         {coursesError && (
           <p className="text-sm text-destructive">{coursesError}</p>

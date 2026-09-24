@@ -7,11 +7,13 @@ import type {
   AttendanceRecord,
   AttendanceStatus,
   Course,
+  CreateCourseRequest,
   Enrollment,
   LoginRequest,
   Session,
   SessionToken,
   TokenPair,
+  UpdateCourseRequest,
 } from "./types";
 
 const BASE = "/api";
@@ -79,15 +81,33 @@ export function login(payload: LoginRequest): Promise<TokenPair> {
 }
 
 // ------------------------------------------------------------- courses
-export function createCourse(name: string): Promise<Course> {
+export function createCourse(payload: CreateCourseRequest): Promise<Course> {
   return request<Course>("/courses", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(payload),
   });
 }
 
 export function listCourses(): Promise<Course[]> {
   return request<Course[]>("/courses");
+}
+
+// PATCH /courses/{course_id} — partial update of schedule/metadata fields.
+export function updateCourse(
+  courseId: string,
+  payload: UpdateCourseRequest,
+): Promise<Course> {
+  return request<Course>(`/courses/${encodeURIComponent(courseId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+// DELETE /courses/{course_id} — irreversible; UI must confirm first.
+export function deleteCourse(courseId: string): Promise<void> {
+  return request<void>(`/courses/${encodeURIComponent(courseId)}`, {
+    method: "DELETE",
+  });
 }
 
 export function enrollStudent(
