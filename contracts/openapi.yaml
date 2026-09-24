@@ -256,9 +256,17 @@ paths:
       description: >
         Full course catalog for timetable planning. Available to any
         authenticated user (student or professor), not just professors. Each
-        item carries an `enrolled` flag for the calling user.
+        item carries an `enrolled` flag for the calling user. Optional `q`
+        filters by course name / professor name / 학수번호 (case-insensitive
+        substring) to back autocomplete; absent/blank `q` returns everything.
       operationId: listCourseCatalog
       security: [{ bearerAuth: [] }]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Case-insensitive substring match on name / professor_name / code.
+          schema: { type: string }
       responses:
         '200':
           description: Course catalog
@@ -721,8 +729,20 @@ components:
           minimum: 0
           maximum: 6
           description: 요일 (0=Mon .. 6=Sun) for timetable placement
-        start_period: { type: integer, nullable: true, description: 시작 교시 }
-        end_period: { type: integer, nullable: true, description: 종료 교시 }
+        start_period:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 12
+          description: >-
+            시작 교시. Periods are 1..12, each 60 min, period 1 starts 09:00
+            (Nth start = 08:00 + N시간). Must be <= end_period (else 422).
+        end_period:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 12
+          description: 종료 교시 (1..12, >= start_period).
         location: { type: string, nullable: true, description: 강의실 }
         credits: { type: number, nullable: true, description: 학점 }
 
@@ -735,8 +755,18 @@ components:
         department: { type: string, nullable: true }
         professor_name: { type: string, nullable: true }
         day_of_week: { type: integer, nullable: true, minimum: 0, maximum: 6 }
-        start_period: { type: integer, nullable: true }
-        end_period: { type: integer, nullable: true }
+        start_period:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 12
+          description: 시작 교시 (1..12). Must be <= end_period (else 422).
+        end_period:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 12
+          description: 종료 교시 (1..12, >= start_period).
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
 

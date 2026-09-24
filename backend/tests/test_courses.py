@@ -328,3 +328,122 @@ async def test_my_courses_returns_schedule(client, session):
     assert item["day_of_week"] == 2
     assert item["location"] == "공대 406"
     assert item["credits"] == 3.0
+
+
+# ------------------------------------------------ period rules + validation
+
+from app.periods import period_to_time, period_end_time, MAX_PERIOD  # noqa: E402
+
+
+def test_period_to_time_helper():
+    assert period_to_time(1) == "09:00"
+    assert period_to_time(2) == "10:00"
+    assert period_to_time(12) == "20:00"
+    assert period_end_time(1) == "10:00"
+    assert period_end_time(12) == "21:00"
+
+
+async def test_create_course_rejects_period_out_of_range(client, session):
+    prof = await _prof(session)
+    hdr = auth_header(prof.id, "professor")
+    # 0 is below MIN_PERIOD
+    r = await client.post(
+        "/courses", json={"name": "X", "start_period": 0, "end_period": 2}, headers=hdr
+    )
+    assert r.status_code == 422
+    # 13 is above MAX_PERIOD
+    r2 = await client.post(
+        "/courses",
+        json={"name": "X", "start_period": 1, "end_period": MAX_PERIOD + 1},
+        headers=hdr,
+    )
+    assert r2.status_code == 422
+
+
+async def test_create_course_rejects_start_after_end(client, session):
+    prof = await _prof(session)
+    hdr = auth_header(prof.id, "professor")
+    r = await client.post(
+        "/courses", json={"name": "X", "start_period": 5, "end_period": 3}, headers=hdr
+    )
+    assert r.status_code == 422
+
+
+async def test_create_course_accepts_valid_periods(client, session):
+    prof = await _prof(session)
+    hdr = auth_header(prof.id, "professor")
+    r = await client.post(
+        "/courses",
+        json={"name": "X", "start_period": 1, "end_period": 12},
+        headers=hdr,
+    )
+    assert r.status_code == 201, r.text
+
+
+async def test_update_course_rejects_inverted_period_after_merge(client, session):
+    prof = await _prof(session)
+    hdr = auth_header(prof.id, "professor")
+    course = (
+        await client.post(
+            "/courses",
+            json={"name": "X", "start_period": 3, "end_period": 6},
+            headers=hdr,
+        )
+    ).json()
+    # Partial update sets only start_period, inverting the stored pair (3..6 -> 9..6)
+    r = await client.patch(
+        f"/courses/{course['id']}", json={"start_period": 9}, headers=hdr
+    )
+    assert r.status_code == 422
+
+
+# ------------------------------------------------ catalog search (q)
+
+
+async def test_catalog_q_matches_name_case_insensitive(client, session):
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    await client.post("/courses", json={"name": "파이썬프로그래밍"}, headers=phdr)
+    await client.post("/courses", json={"name": "자료구조"}, headers=phdr)
+
+    shdr = auth_header(stu.id, "student")
+    r = await client.get("/courses/catalog", params={"q": "파이썬"}, headers=shdr)
+    assert r.status_code == 200, r.text
+    names = [c["name"] for c in r.json()]
+    assert names == ["파이썬프로그래밍"]
+
+
+async def test_catalog_q_matches_professor_name_and_code(client, session):
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    await client.post(
+        "/courses",
+        json={"name": "A", "professor_name": "김교수", "code": "374142"},
+        headers=phdr,
+    )
+    await client.post("/courses", json={"name": "B", "professor_name": "이교수"}, headers=phdr)
+    shdr = auth_header(stu.id, "student")
+
+    by_prof = await client.get("/courses/catalog", params={"q": "김교수"}, headers=shdr)
+    assert [c["name"] for c in by_prof.json()] == ["A"]
+
+    by_code = await client.get("/courses/catalog", params={"q": "374142"}, headers=shdr)
+    assert [c["name"] for c in by_code.json()] == ["A"]
+
+
+async def test_catalog_blank_q_returns_all(client, session):
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    await client.post("/courses", json={"name": "A"}, headers=phdr)
+    await client.post("/courses", json={"name": "B"}, headers=phdr)
+    shdr = auth_header(stu.id, "student")
+
+    # absent q
+    all_r = await client.get("/courses/catalog", headers=shdr)
+    assert len(all_r.json()) == 2
+    # blank q -> still all (backward compatible)
+    blank_r = await client.get("/courses/catalog", params={"q": "   "}, headers=shdr)
+    assert len(blank_r.json()) == 2

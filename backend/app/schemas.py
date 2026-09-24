@@ -9,7 +9,9 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+
+from app.periods import MAX_PERIOD, MIN_PERIOD
 
 
 # ------------------------------------------------------------------- enums
@@ -131,16 +133,30 @@ class DeviceBinding(BaseModel):
 
 
 # ----------------------------------------------------------------- courses
+def _validate_period_order(model):
+    """When both start_period and end_period are set, require start <= end.
+    Range (1..MAX_PERIOD) is enforced per-field via Field(ge/le)."""
+    start = model.start_period
+    end = model.end_period
+    if start is not None and end is not None and start > end:
+        raise ValueError("start_period must be <= end_period")
+    return model
+
+
 class CreateCourseRequest(BaseModel):
     name: str
     code: str | None = None
     department: str | None = None
     professor_name: str | None = None
     day_of_week: int | None = Field(default=None, ge=0, le=6)  # 0=Mon..6=Sun
-    start_period: int | None = None
-    end_period: int | None = None
+    start_period: int | None = Field(default=None, ge=MIN_PERIOD, le=MAX_PERIOD)
+    end_period: int | None = Field(default=None, ge=MIN_PERIOD, le=MAX_PERIOD)
     location: str | None = None
     credits: float | None = None
+
+    @model_validator(mode="after")
+    def _check_period_order(self) -> "CreateCourseRequest":
+        return _validate_period_order(self)
 
 
 class UpdateCourseRequest(BaseModel):
@@ -151,10 +167,14 @@ class UpdateCourseRequest(BaseModel):
     department: str | None = None
     professor_name: str | None = None
     day_of_week: int | None = Field(default=None, ge=0, le=6)
-    start_period: int | None = None
-    end_period: int | None = None
+    start_period: int | None = Field(default=None, ge=MIN_PERIOD, le=MAX_PERIOD)
+    end_period: int | None = Field(default=None, ge=MIN_PERIOD, le=MAX_PERIOD)
     location: str | None = None
     credits: float | None = None
+
+    @model_validator(mode="after")
+    def _check_period_order(self) -> "UpdateCourseRequest":
+        return _validate_period_order(self)
 
 
 class CourseOut(BaseModel):

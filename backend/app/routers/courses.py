@@ -13,8 +13,8 @@ their timetable.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
@@ -128,6 +128,17 @@ async def update_course(
     # Apply only fields the client actually sent (partial update).
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(course, field, value)
+    # After merge, guard the period pair on the resulting row (a partial update
+    # that sets only one period could otherwise invert start/end).
+    if (
+        course.start_period is not None
+        and course.end_period is not None
+        and course.start_period > course.end_period
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="start_period must be <= end_period",
+        )
     await db.commit()
     await db.refresh(course)
     return _course_out(course)
@@ -225,14 +236,30 @@ async def list_enrollments(
     operation_id="listCourseCatalog",
 )
 async def list_course_catalog(
+    q: str | None = Query(
+        default=None,
+        description="Partial match on course name / professor_name / code (case-insensitive)",
+    ),
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> list[CourseCatalogItem]:
     """All offered courses, for any authenticated user to browse (timetable
-    planning). Flags which ones the caller is already enrolled in."""
-    courses = (
-        await db.execute(select(Course).order_by(Course.name))
-    ).scalars().all()
+    planning). Flags which ones the caller is already enrolled in.
+
+    Optional `q` filters by course name, professor name, or 학수번호 (ILIKE,
+    case-insensitive substring). Absent/blank `q` returns everything (the
+    original behavior — backward compatible)."""
+    stmt = select(Course)
+    if q is not None and q.strip():
+        pattern = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                Course.name.ilike(pattern),
+                Course.professor_name.ilike(pattern),
+                Course.code.ilike(pattern),
+            )
+        )
+    courses = (await db.execute(stmt.order_by(Course.name))).scalars().all()
     my_ids = set(
         (
             await db.execute(

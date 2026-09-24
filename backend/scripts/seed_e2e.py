@@ -39,10 +39,15 @@ STUDENTS = [
 ]
 
 _DEPT = "컴퓨터·소프트웨어공학과"
+_DEPT_CONTENT = "콘텐츠미디어SW융합전공"
+_DEPT_AI = "인공지능융합학과"
 
-# Real Wonkwang CS courses (학수번호/학점 real; 요일·교시·강의실 are demo values).
-# day_of_week: 0=Mon .. 4=Fri. All owned by the seed professor.
+# Real Wonkwang courses (학수번호/학점 real; 요일·교시·강의실 are demo values).
+# day_of_week: 0=Mon .. 4=Fri. Periods follow the 1..12 / 60-min rule
+# (see app/periods.py). All owned by the seed professor. `department` is
+# per-course; entries without it default to the CS department.
 COURSES = [
+    # --- 컴퓨터·소프트웨어공학과 ---
     {"name": "컴퓨터개론",          "code": "374140", "credits": 3.0,
      "day_of_week": 0, "start_period": 1, "end_period": 2, "location": "공대 401"},
     {"name": "C언어프로그래밍",      "code": "374142", "credits": 3.0,
@@ -59,6 +64,29 @@ COURSES = [
      "day_of_week": 3, "start_period": 1, "end_period": 2, "location": "공대 407"},
     {"name": "웹(HTML5)프로그래밍",  "code": "374152", "credits": 3.0,
      "day_of_week": 4, "start_period": 3, "end_period": 4, "location": "공대 408"},
+    # --- 콘텐츠미디어SW융합전공 (autocomplete master data) ---
+    {"name": "데이터구조",           "code": "375210", "credits": 3.0,
+     "department": _DEPT_CONTENT,
+     "day_of_week": 0, "start_period": 5, "end_period": 6, "location": "미디어관 201"},
+    {"name": "컴퓨팅적사고력",       "code": "375211", "credits": 3.0,
+     "department": _DEPT_CONTENT,
+     "day_of_week": 1, "start_period": 5, "end_period": 6, "location": "미디어관 202"},
+    {"name": "과학적데이터처리",     "code": "375212", "credits": 3.0,
+     "department": _DEPT_CONTENT,
+     "day_of_week": 2, "start_period": 5, "end_period": 6, "location": "미디어관 203"},
+    {"name": "디지털콘텐츠디자인",   "code": "375213", "credits": 3.0,
+     "department": _DEPT_CONTENT,
+     "day_of_week": 3, "start_period": 3, "end_period": 4, "location": "미디어관 204"},
+    {"name": "인터랙티브미디어",     "code": "375214", "credits": 3.0,
+     "department": _DEPT_CONTENT,
+     "day_of_week": 4, "start_period": 5, "end_period": 6, "location": "미디어관 205"},
+    # --- 인공지능융합학과 ---
+    {"name": "소프트웨어융합개론",   "code": "376320", "credits": 3.0,
+     "department": _DEPT_AI,
+     "day_of_week": 0, "start_period": 7, "end_period": 8, "location": "AI관 301"},
+    {"name": "기계학습기초",         "code": "376321", "credits": 3.0,
+     "department": _DEPT_AI,
+     "day_of_week": 2, "start_period": 7, "end_period": 8, "location": "AI관 302"},
 ]
 # The live attendance session opens against this course (student1 pre-bound device).
 E2E_SESSION_COURSE = "C언어프로그래밍"
@@ -106,7 +134,7 @@ async def _get_or_create_course(
             professor_id=professor_id,
             name=spec["name"],
             code=spec.get("code"),
-            department=_DEPT,
+            department=spec.get("department", _DEPT),
             professor_name=professor_name,
             day_of_week=spec.get("day_of_week"),
             start_period=spec.get("start_period"),
@@ -119,7 +147,7 @@ async def _get_or_create_course(
         return course
     # Backfill/refresh schedule metadata on existing rows (idempotent update).
     course.code = spec.get("code")
-    course.department = _DEPT
+    course.department = spec.get("department", _DEPT)
     course.professor_name = professor_name
     course.day_of_week = spec.get("day_of_week")
     course.start_period = spec.get("start_period")
