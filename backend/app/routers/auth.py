@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
+from app.deps import CurrentUser, get_current_user
 from app.models import User
 from app.schemas import (
     LoginRequest,
@@ -78,6 +79,33 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)) -> Token
         access_token=create_access_token(user.id, user.role),
         refresh_token=create_refresh_token(user.id, user.role),
         role=Role(user.role),
+    )
+
+
+@router.get("/me", response_model=UserOut, operation_id="getMe")
+async def get_me(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserOut:
+    """
+    Return the authenticated user's profile (id/email/role/name).
+
+    Lets a client resolve its own account id from an access token alone —
+    e.g. the mobile app subscribing to /sse/students/{id} without a "me"
+    placeholder, and without decoding the JWT client-side.
+    """
+    account = (
+        await db.execute(select(User).where(User.id == user.id))
+    ).scalar_one_or_none()
+    if account is None:  # token valid but account gone (rare race)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="user not found"
+        )
+    return UserOut(
+        id=account.id,
+        email=account.email,
+        role=Role(account.role),
+        name=account.name,
     )
 
 

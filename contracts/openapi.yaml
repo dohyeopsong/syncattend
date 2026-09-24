@@ -104,6 +104,25 @@ paths:
               schema: { $ref: '#/components/schemas/TokenPair' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /auth/me:
+    get:
+      tags: [auth]
+      summary: Current authenticated user's profile
+      description: >
+        Returns the authenticated user's id/email/role/name from the access
+        token alone. Lets clients resolve their own account id without decoding
+        the JWT — e.g. the mobile app subscribing to /sse/students/{id} and the
+        student attendance history view.
+      operationId: getMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Authenticated user profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOut' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   # ------------------------------------------------------------- devices
   /devices/register:
     post:
@@ -377,6 +396,26 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/VerifyResult' }
+
+  /me/attendance:
+    get:
+      tags: [attendance]
+      summary: Authenticated student's own attendance history
+      description: >
+        Returns the calling student's attendance records (newest first) joined
+        with course context (course_id/name, session opened time). Backs the
+        mobile student history screen with real data instead of a placeholder.
+      operationId: getMyAttendance
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Attendance history for the authenticated student
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MyAttendanceItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /sessions/{id}/attendance:
     get:
@@ -655,6 +694,18 @@ components:
         student_id: { type: string }
         status: { $ref: '#/components/schemas/AttendanceStatus' }
         verified_at: { type: string, format: date-time, nullable: true }
+
+    MyAttendanceItem:
+      type: object
+      description: One row of a student's own attendance history, with course context.
+      properties:
+        record_id: { type: string }
+        session_id: { type: string }
+        course_id: { type: string }
+        course_name: { type: string }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        verified_at: { type: string, format: date-time, nullable: true }
+        session_opened_at: { type: string, format: date-time, nullable: true }
 
     AttendanceDelta:
       type: object

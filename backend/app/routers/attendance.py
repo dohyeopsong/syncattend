@@ -30,6 +30,7 @@ from app.schemas import (
     AttendanceStatus,
     BatchCloseRequest,
     CorrectAttendanceRequest,
+    MyAttendanceItem,
     VerifyReason,
     VerifyRequest,
     VerifyResult,
@@ -139,6 +140,43 @@ async def verify_attendance(
         reason=None,
         risk_warning=risk_warning_for(absences),
     )
+
+
+@router.get(
+    "/me/attendance",
+    response_model=list[MyAttendanceItem],
+    operation_id="getMyAttendance",
+)
+async def get_my_attendance(
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[MyAttendanceItem]:
+    """
+    The authenticated student's own attendance history, newest first, with
+    course context so the mobile app can render real rows (no placeholder).
+    Each row is one attendance record joined to its session and course.
+    """
+    rows = (
+        await db.execute(
+            select(Attendance, Session, Course)
+            .join(Session, Attendance.session_id == Session.id)
+            .join(Course, Session.course_id == Course.id)
+            .where(Attendance.student_id == user.id)
+            .order_by(Session.window_opened_at.desc())
+        )
+    ).all()
+    return [
+        MyAttendanceItem(
+            record_id=att.id,
+            session_id=att.session_id,
+            course_id=course.id,
+            course_name=course.name,
+            status=AttendanceStatus(att.status),
+            verified_at=att.verified_at,
+            session_opened_at=sess.window_opened_at,
+        )
+        for att, sess, course in rows
+    ]
 
 
 async def _load_owned_session(db: AsyncSession, session_id: str, professor_id: str) -> Session:

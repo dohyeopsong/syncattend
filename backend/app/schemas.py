@@ -188,6 +188,18 @@ class AttendanceRecord(BaseModel):
     verified_at: datetime | None = None
 
 
+class MyAttendanceItem(BaseModel):
+    """One row of a student's own attendance history, with course context."""
+
+    record_id: str
+    session_id: str
+    course_id: str
+    course_name: str
+    status: AttendanceStatus
+    verified_at: datetime | None = None
+    session_opened_at: datetime | None = None
+
+
 class AttendanceDelta(BaseModel):
     student_id: str
     status: AttendanceStatus
