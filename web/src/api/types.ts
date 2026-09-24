@@ -15,8 +15,8 @@ export interface LoginRequest {
   password: string;
 }
 
-// day_of_week: 1=Mon … 7=Sun (ISO-8601 weekday), null when unscheduled.
-export type DayOfWeek = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+// day_of_week: 0=Mon … 6=Sun (per contract), null when unscheduled.
+export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 export interface Course {
   id: string;

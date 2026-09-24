@@ -20,18 +20,18 @@ import type {
 } from "@/api/types";
 import { BookOpen, Pencil, Play, Plus, Trash2, X } from "lucide-react";
 
-// day_of_week: 1=Mon … 7=Sun (ISO-8601 weekday).
+// day_of_week: 0=Mon … 6=Sun (per contract).
 const DAY_LABELS: Record<DayOfWeek, string> = {
-  1: "월",
-  2: "화",
-  3: "수",
-  4: "목",
-  5: "금",
-  6: "토",
-  7: "일",
+  0: "월",
+  1: "화",
+  2: "수",
+  3: "목",
+  4: "금",
+  5: "토",
+  6: "일",
 };
 
-const DAY_OPTIONS: DayOfWeek[] = [1, 2, 3, 4, 5, 6, 7];
+const DAY_OPTIONS: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];
 
 // Editable schedule fields shared by the add + edit forms (all strings for
 // controlled inputs; converted to typed payload on submit).
