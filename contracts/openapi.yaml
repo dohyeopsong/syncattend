@@ -1,0 +1,519 @@
+openapi: 3.0.3
+info:
+  title: Syncattend (SDAS) API Contract
+  version: 0.1.0-draft
+  description: >
+    Shared API contract for Syncattend V3 (dual-auth smart attendance).
+    OWNERSHIP: this file is the single source of truth for the HTTP contract.
+    Only backend (owner A) may modify it. mobile (B) and web (C) READ ONLY.
+    Layered defense: dynamic QR (time/identity) + ultrasonic audio token
+    (space/proximity) + identity defense (1-min window + server uniqueness +
+    app-generated UUID device binding + @wku.ac.kr re-registration) + professor-in-the-loop.
+
+servers:
+  - url: http://localhost:8000
+    description: Local dev (backend)
+
+tags:
+  - name: health
+  - name: auth
+  - name: devices
+  - name: sessions
+  - name: attendance
+  - name: sse
+
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Liveness/health check
+      operationId: getHealth
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  # ---------------------------------------------------------------- auth
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Login, issue JWT
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: JWT issued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /auth/refresh:
+    post:
+      tags: [auth]
+      summary: Refresh access token
+      operationId: refresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenPair' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  # ------------------------------------------------------------- devices
+  /devices/register:
+    post:
+      tags: [devices]
+      summary: Bind app-generated UUID to account (NO auto-bind for new/unknown UUID)
+      description: >
+        First binding of a new/unknown UUID must go through email re-auth.
+        This endpoint binds only when the account has no binding conflict;
+        otherwise it returns 409 and the client must use /devices/reregister/*.
+      operationId: registerDevice
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_uuid]
+              properties:
+                device_uuid: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Device bound
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceBinding' }
+        '409':
+          description: Binding conflict — email re-registration required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /devices/reregister/request:
+    post:
+      tags: [devices]
+      summary: Request device change — send verification code to @wku.ac.kr email
+      operationId: reregisterRequest
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  description: Must be a @wku.ac.kr address
+      responses:
+        '202': { description: Verification code sent }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /devices/reregister/confirm:
+    post:
+      tags: [devices]
+      summary: Confirm email code and rebind to new UUID
+      operationId: reregisterConfirm
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code, new_device_uuid]
+              properties:
+                email: { type: string, format: email }
+                code: { type: string }
+                new_device_uuid: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Rebound to new device
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceBinding' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /devices/me:
+    get:
+      tags: [devices]
+      summary: Current account device binding
+      operationId: getMyDevice
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Binding info
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceBinding' }
+
+  # ------------------------------------------------------------ sessions
+  /sessions:
+    post:
+      tags: [sessions]
+      summary: Professor starts an attendance session (opens ~60s auth window)
+      operationId: createSession
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [course_id]
+              properties:
+                course_id: { type: string }
+                window_seconds: { type: integer, default: 60 }
+      responses:
+        '201':
+          description: Session created, window open
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+
+  /sessions/{id}/window/extend:
+    post:
+      tags: [sessions]
+      summary: Extend/reopen the auth window (professor-in-the-loop)
+      operationId: extendWindow
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                add_seconds: { type: integer, default: 60 }
+      responses:
+        '200':
+          description: Window extended
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+
+  /sessions/{id}/close:
+    post:
+      tags: [sessions]
+      summary: Close session
+      operationId: closeSession
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: Session closed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+
+  /sessions/{id}/token:
+    get:
+      tags: [sessions]
+      summary: Current QR token + audio nonce (15s TTL, single-use)
+      description: >
+        Professor client polls this to render the rotating QR and emit the
+        ultrasonic audio nonce. Both tokens rotate every 15s and are single-use.
+      operationId: getSessionToken
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: Current tokens
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionToken' }
+
+  # ---------------------------------------------------------- attendance
+  /attendance/verify:
+    post:
+      tags: [attendance]
+      summary: Student cross-verification (window + QR×audio + single-use nonce + device + uniqueness)
+      description: >
+        Server verification order:
+        (1) auth window open, (2) QR×audio cross-verify,
+        (3) single-use nonce not yet consumed (consume on pass),
+        (4) device_uuid matches account binding,
+        (5) uniqueness: one attendance per account & per device_uuid per session.
+      operationId: verifyAttendance
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyRequest' }
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyResult' }
+        '409':
+          description: Rejected (see reason)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyResult' }
+
+  /sessions/{id}/attendance:
+    get:
+      tags: [attendance]
+      summary: Live attendance rate + unverified list (professor)
+      operationId: getSessionAttendance
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: Aggregation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceAggregate' }
+
+  /sessions/{id}/attendance/batch:
+    post:
+      tags: [attendance]
+      summary: Delta-based batch close (only changed/unverified records)
+      operationId: batchCloseAttendance
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [deltas]
+              properties:
+                deltas:
+                  type: array
+                  items: { $ref: '#/components/schemas/AttendanceDelta' }
+      responses:
+        '200':
+          description: Batch applied
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceAggregate' }
+
+  /attendance/{record_id}:
+    patch:
+      tags: [attendance]
+      summary: Manual correction of one record (professor-in-the-loop)
+      operationId: correctAttendance
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: record_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: '#/components/schemas/AttendanceStatus' }
+      responses:
+        '200':
+          description: Updated record
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceRecord' }
+
+  # ---------------------------------------------------------------- sse
+  /sse/students/{id}:
+    get:
+      tags: [sse]
+      summary: Student risk-group warning stream (SSE)
+      operationId: sseStudent
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: text/event-stream of RiskWarning events
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/RiskWarning' }
+
+  /sse/sessions/{id}:
+    get:
+      tags: [sse]
+      summary: Professor live attendance stream (SSE)
+      operationId: sseSession
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: text/event-stream of AttendanceAggregate events
+          content:
+            text/event-stream:
+              schema: { $ref: '#/components/schemas/AttendanceAggregate' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Health:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+        service: { type: string, example: syncattend-backend }
+        version: { type: string, example: 0.1.0 }
+
+    Error:
+      type: object
+      properties:
+        detail: { type: string }
+        code: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    TokenPair:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string }
+        token_type: { type: string, example: bearer }
+        role: { $ref: '#/components/schemas/Role' }
+
+    Role:
+      type: string
+      enum: [student, professor]
+
+    DeviceBinding:
+      type: object
+      properties:
+        account_id: { type: string }
+        device_uuid: { type: string, format: uuid }
+        bound_at: { type: string, format: date-time }
+
+    Session:
+      type: object
+      properties:
+        session_id: { type: string }
+        course_id: { type: string }
+        window_open: { type: boolean }
+        window_remaining: { type: integer, description: seconds left in auth window }
+        status: { type: string, enum: [open, closed] }
+
+    SessionToken:
+      type: object
+      properties:
+        session_id: { type: string }
+        qr_token: { type: string }
+        audio_nonce: { type: string }
+        expires_in: { type: integer, example: 15 }
+        window_open: { type: boolean }
+        window_remaining: { type: integer }
+
+    VerifyRequest:
+      type: object
+      required: [session_id, qr_token, audio_nonce, device_uuid]
+      properties:
+        session_id: { type: string }
+        qr_token: { type: string }
+        audio_nonce: { type: string }
+        device_uuid: { type: string, format: uuid }
+
+    VerifyResult:
+      type: object
+      properties:
+        status: { type: string, enum: [present, pending, rejected] }
+        cross_verified: { type: boolean }
+        device_matched: { type: boolean }
+        reason:
+          type: string
+          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          nullable: true
+        risk_warning:
+          $ref: '#/components/schemas/RiskWarning'
+          nullable: true
+
+    AttendanceStatus:
+      type: string
+      enum: [present, absent, pending]
+
+    AttendanceRecord:
+      type: object
+      properties:
+        record_id: { type: string }
+        session_id: { type: string }
+        student_id: { type: string }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        verified_at: { type: string, format: date-time, nullable: true }
+
+    AttendanceDelta:
+      type: object
+      required: [student_id, status]
+      properties:
+        student_id: { type: string }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+
+    AttendanceAggregate:
+      type: object
+      properties:
+        session_id: { type: string }
+        total: { type: integer }
+        present: { type: integer }
+        unverified:
+          type: array
+          items: { type: string, description: student_id }
+
+    RiskWarning:
+      type: object
+      properties:
+        level: { type: string, enum: [info, warning, danger] }
+        absences: { type: integer }
+        message: { type: string }
