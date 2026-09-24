@@ -249,6 +249,106 @@ paths:
                 items: { $ref: '#/components/schemas/Course' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /courses/catalog:
+    get:
+      tags: [courses]
+      summary: Browse all offered courses (any authenticated user)
+      description: >
+        Full course catalog for timetable planning. Available to any
+        authenticated user (student or professor), not just professors. Each
+        item carries an `enrolled` flag for the calling user.
+      operationId: listCourseCatalog
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Course catalog
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CourseCatalogItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /courses/{course_id}:
+    patch:
+      tags: [courses]
+      summary: Update a course (professor-owned course only)
+      operationId: updateCourse
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateCourseRequest' }
+      responses:
+        '200':
+          description: Course updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Course' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [courses]
+      summary: Delete a course (professor-owned course only)
+      description: >
+        Deletes the course; enrollments and sessions (and their attendance)
+        cascade via FK ON DELETE CASCADE.
+      operationId: deleteCourse
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '204': { description: Course deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /courses/{course_id}/enroll-self:
+    post:
+      tags: [courses]
+      summary: Student enrolls themselves in a course
+      operationId: enrollSelf
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '201':
+          description: Enrolled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already enrolled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [courses]
+      summary: Student cancels their own enrollment
+      operationId: unenrollSelf
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '204': { description: Unenrolled }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me/courses:
+    get:
+      tags: [courses]
+      summary: Courses the calling student is enrolled in (timetable source)
+      operationId: listMyCourses
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Enrolled courses with schedule fields
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/MyCourseItem' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /courses/{course_id}/enrollments:
     post:
       tags: [courses]
@@ -612,6 +712,33 @@ components:
       required: [name]
       properties:
         name: { type: string }
+        code: { type: string, nullable: true, description: 학수번호 e.g. "374142" }
+        department: { type: string, nullable: true, description: 학과명 }
+        professor_name: { type: string, nullable: true, description: 표시용 교수명 }
+        day_of_week:
+          type: integer
+          nullable: true
+          minimum: 0
+          maximum: 6
+          description: 요일 (0=Mon .. 6=Sun) for timetable placement
+        start_period: { type: integer, nullable: true, description: 시작 교시 }
+        end_period: { type: integer, nullable: true, description: 종료 교시 }
+        location: { type: string, nullable: true, description: 강의실 }
+        credits: { type: number, nullable: true, description: 학점 }
+
+    UpdateCourseRequest:
+      type: object
+      description: Partial update — only provided fields are applied.
+      properties:
+        name: { type: string }
+        code: { type: string, nullable: true }
+        department: { type: string, nullable: true }
+        professor_name: { type: string, nullable: true }
+        day_of_week: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+        start_period: { type: integer, nullable: true }
+        end_period: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        credits: { type: number, nullable: true }
 
     Course:
       type: object
@@ -619,7 +746,48 @@ components:
         id: { type: string }
         professor_id: { type: string }
         name: { type: string }
+        code: { type: string, nullable: true }
+        department: { type: string, nullable: true }
+        professor_name: { type: string, nullable: true }
+        day_of_week: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+        start_period: { type: integer, nullable: true }
+        end_period: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        credits: { type: number, nullable: true }
         created_at: { type: string, format: date-time }
+
+    CourseCatalogItem:
+      type: object
+      description: A course in the browsable catalog, with the caller's enrollment flag.
+      properties:
+        id: { type: string }
+        professor_id: { type: string }
+        name: { type: string }
+        code: { type: string, nullable: true }
+        department: { type: string, nullable: true }
+        professor_name: { type: string, nullable: true }
+        day_of_week: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+        start_period: { type: integer, nullable: true }
+        end_period: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        credits: { type: number, nullable: true }
+        enrolled: { type: boolean, description: whether the calling student is enrolled }
+
+    MyCourseItem:
+      type: object
+      description: A course the calling student is enrolled in (timetable source).
+      properties:
+        id: { type: string }
+        professor_id: { type: string }
+        name: { type: string }
+        code: { type: string, nullable: true }
+        department: { type: string, nullable: true }
+        professor_name: { type: string, nullable: true }
+        day_of_week: { type: integer, nullable: true, minimum: 0, maximum: 6 }
+        start_period: { type: integer, nullable: true }
+        end_period: { type: integer, nullable: true }
+        location: { type: string, nullable: true }
+        credits: { type: number, nullable: true }
 
     EnrollRequest:
       type: object

@@ -4,6 +4,10 @@ Draft PostgreSQL schema for Syncattend V3. **Only owner A edits this.**
 
 - `0001_initial_schema.sql` — users, devices (+ device_changes), courses (+ enrollments),
   sessions (with 60s auth window), attendance (server uniqueness constraints), nonces (single-use audit).
+- `0002_course_schedule.sql` — optional timetable/catalog fields on `courses`
+  (code, department, professor_name, day_of_week, start_period, end_period, location, credits),
+  all nullable. Idempotent `ADD COLUMN IF NOT EXISTS` for databases created under 0001;
+  fresh boots already get the columns via the updated 0001 `CREATE TABLE courses`.
 
 ## How it's applied
 For local dev, `infra/docker-compose.yml` mounts this folder into Postgres'

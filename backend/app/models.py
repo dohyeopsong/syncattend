@@ -15,6 +15,8 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Integer,
+    Numeric,
     String,
     UniqueConstraint,
 )
@@ -83,7 +85,23 @@ class Course(Base):
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Optional timetable/catalog metadata (all nullable for backward compat).
+    code: Mapped[str | None] = mapped_column(String(32))            # 학수번호 e.g. "374142"
+    department: Mapped[str | None] = mapped_column(String(255))     # 학과명
+    professor_name: Mapped[str | None] = mapped_column(String(255))  # display name
+    day_of_week: Mapped[int | None] = mapped_column(Integer)        # 0=Mon .. 6=Sun
+    start_period: Mapped[int | None] = mapped_column(Integer)       # 시작 교시
+    end_period: Mapped[int | None] = mapped_column(Integer)         # 종료 교시
+    location: Mapped[str | None] = mapped_column(String(255))       # 강의실
+    credits: Mapped[float | None] = mapped_column(Numeric(3, 1))    # 학점
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+    __table_args__ = (
+        CheckConstraint(
+            "day_of_week IS NULL OR (day_of_week >= 0 AND day_of_week <= 6)",
+            name="ck_courses_day_of_week",
+        ),
+    )
 
 
 class Enrollment(Base):

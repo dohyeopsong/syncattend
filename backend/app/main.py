@@ -87,6 +87,7 @@ async def get_health() -> Health:
 app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(courses.router)
+app.include_router(courses.me_router)
 app.include_router(sessions.router)
 app.include_router(attendance.router)
 app.include_router(sse.router)

@@ -133,13 +133,76 @@ class DeviceBinding(BaseModel):
 # ----------------------------------------------------------------- courses
 class CreateCourseRequest(BaseModel):
     name: str
+    code: str | None = None
+    department: str | None = None
+    professor_name: str | None = None
+    day_of_week: int | None = Field(default=None, ge=0, le=6)  # 0=Mon..6=Sun
+    start_period: int | None = None
+    end_period: int | None = None
+    location: str | None = None
+    credits: float | None = None
+
+
+class UpdateCourseRequest(BaseModel):
+    """Partial update — every field optional; only provided fields are applied."""
+
+    name: str | None = None
+    code: str | None = None
+    department: str | None = None
+    professor_name: str | None = None
+    day_of_week: int | None = Field(default=None, ge=0, le=6)
+    start_period: int | None = None
+    end_period: int | None = None
+    location: str | None = None
+    credits: float | None = None
 
 
 class CourseOut(BaseModel):
     id: str
     professor_id: str
     name: str
+    code: str | None = None
+    department: str | None = None
+    professor_name: str | None = None
+    day_of_week: int | None = None
+    start_period: int | None = None
+    end_period: int | None = None
+    location: str | None = None
+    credits: float | None = None
     created_at: datetime
+
+
+class CourseCatalogItem(BaseModel):
+    """A course as seen by any authenticated user browsing the catalog."""
+
+    id: str
+    professor_id: str
+    name: str
+    code: str | None = None
+    department: str | None = None
+    professor_name: str | None = None
+    day_of_week: int | None = None
+    start_period: int | None = None
+    end_period: int | None = None
+    location: str | None = None
+    credits: float | None = None
+    enrolled: bool = False  # whether the calling student is enrolled
+
+
+class MyCourseItem(BaseModel):
+    """A course the calling student is enrolled in (timetable data source)."""
+
+    id: str
+    professor_id: str
+    name: str
+    code: str | None = None
+    department: str | None = None
+    professor_name: str | None = None
+    day_of_week: int | None = None
+    start_period: int | None = None
+    end_period: int | None = None
+    location: str | None = None
+    credits: float | None = None
 
 
 class EnrollRequest(BaseModel):

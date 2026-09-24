@@ -48,10 +48,20 @@ CREATE TABLE IF NOT EXISTS device_changes (
 
 -- ------------------------------------------------------------- courses
 CREATE TABLE IF NOT EXISTS courses (
-    id           TEXT PRIMARY KEY,
-    professor_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    name         TEXT NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+    id             TEXT PRIMARY KEY,
+    professor_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    -- Optional timetable/catalog metadata (all nullable for backward compat;
+    -- see 0002_course_schedule.sql for existing databases).
+    code           TEXT,                              -- 학수번호 e.g. '374142'
+    department     TEXT,                              -- 학과명
+    professor_name TEXT,                              -- display name
+    day_of_week    INTEGER CHECK (day_of_week IS NULL OR (day_of_week >= 0 AND day_of_week <= 6)),
+    start_period   INTEGER,                           -- 시작 교시
+    end_period     INTEGER,                           -- 종료 교시
+    location       TEXT,                              -- 강의실
+    credits        NUMERIC(3,1),                      -- 학점
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS enrollments (
