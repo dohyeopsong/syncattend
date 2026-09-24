@@ -186,3 +186,116 @@ async def test_aggregate_and_delta_batch(client, session):
     assert r.status_code == 200
     # present count unchanged; absent now recorded
     assert r.json()["present"] == 1
+
+
+# --------------------------------------------------------------------------
+# Additional coverage: 404, unregistered device, device-axis uniqueness,
+# and verification-order precedence (steps run in the contract's order).
+# --------------------------------------------------------------------------
+async def test_verify_session_not_found(client, session):
+    """Unknown session_id → 404 (before any 5-step verification)."""
+    ctx = await _setup(client, session)
+    r = await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": str(uuid.uuid4()),  # no such session
+            "qr_token": ctx["tok"]["qr_token"],
+            "audio_nonce": ctx["tok"]["audio_nonce"],
+            "device_uuid": ctx["student_uuid"],
+        },
+        headers=ctx["s_hdr"],
+    )
+    assert r.status_code == 404, r.text
+
+
+async def test_reject_device_not_registered(client, session):
+    """A student with no active device binding is rejected at step (4)."""
+    ctx = await _setup(client, session)
+    # A different enrolled student who never registered a device.
+    student2 = await seed_user(
+        session, f"s2_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student"
+    )
+    await seed_enrollment(session, ctx["course"].id, student2.id)
+    s2_hdr = auth_header(student2.id, "student")
+
+    r = await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": ctx["session"].id,
+            "qr_token": ctx["tok"]["qr_token"],
+            "audio_nonce": ctx["tok"]["audio_nonce"],
+            "device_uuid": str(uuid.uuid4()),
+        },
+        headers=s2_hdr,
+    )
+    assert r.status_code == 409
+    assert r.json()["reason"] == "device_mismatch"
+
+
+async def test_shared_device_blocked_at_registration(client, session):
+    """
+    One-phone-many-accounts fraud is stopped at the *registration* layer:
+    a device_uuid is globally unique (one device per account), so a second
+    account trying to bind an already-used UUID is rejected with 409 before it
+    can ever reach attendance verification. This is the outer defense line for
+    the (session, device) uniqueness guarantee.
+    """
+    ctx = await _setup(client, session)
+    sid = ctx["session"].id
+
+    # student #1 attends on their bound device
+    b1 = {
+        "session_id": sid,
+        "qr_token": ctx["tok"]["qr_token"],
+        "audio_nonce": ctx["tok"]["audio_nonce"],
+        "device_uuid": ctx["student_uuid"],
+    }
+    assert (
+        await client.post("/attendance/verify", json=b1, headers=ctx["s_hdr"])
+    ).status_code == 200
+
+    # student #2 attempts to bind the SAME physical device (same UUID)
+    student2 = await seed_user(
+        session, f"s2_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student"
+    )
+    await seed_enrollment(session, ctx["course"].id, student2.id)
+    s2_hdr = auth_header(student2.id, "student")
+    reg = await client.post(
+        "/devices/register", json={"device_uuid": ctx["student_uuid"]}, headers=s2_hdr
+    )
+    assert reg.status_code == 409, reg.text  # UUID already bound to another account
+
+    # With no active binding of their own, student #2 also can't verify:
+    # step (4) device match fails.
+    tok2 = (await client.get(f"/sessions/{sid}/token", headers=ctx["p_hdr"])).json()
+    b2 = {
+        "session_id": sid,
+        "qr_token": tok2["qr_token"],
+        "audio_nonce": tok2["audio_nonce"],
+        "device_uuid": ctx["student_uuid"],
+    }
+    r = await client.post("/attendance/verify", json=b2, headers=s2_hdr)
+    assert r.status_code == 409
+    assert r.json()["reason"] == "device_mismatch"
+
+
+async def test_window_precedence_over_cross_verify(client, session):
+    """
+    Verification runs in order: a closed window (step 1) is reported even when
+    the cross-verify pair (step 2) would also fail. Guarantees stable ordering.
+    """
+    ctx = await _setup(client, session)
+    await client.post(f"/sessions/{ctx['session'].id}/close", headers=ctx["p_hdr"])
+    r = await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": ctx["session"].id,
+            "qr_token": ctx["tok"]["qr_token"],
+            "audio_nonce": "tampered-audio-nonce",  # would fail step 2 as well
+            "device_uuid": ctx["student_uuid"],
+        },
+        headers=ctx["s_hdr"],
+    )
+    assert r.status_code == 409
+    # window_closed (step 1) wins over cross_verify_failed (step 2)
+    assert r.json()["reason"] == "window_closed"
