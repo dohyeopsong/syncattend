@@ -108,3 +108,64 @@ async def test_reregister_rejects_non_school_email(client, session):
         "/devices/reregister/request", json={"email": "s7@gmail.com"}, headers=hdr
     )
     assert r.status_code == 400
+
+
+async def test_reregister_request_normalizes_email(client, session):
+    """Uppercase + surrounding whitespace must be normalized, not 422'd.
+
+    Real iOS keyboards/autofill capitalize or pad the email; the request must
+    still succeed and store the code under the canonical (lower) key.
+    """
+    from app.redis_client import get_redis
+
+    user = await seed_user(session, "s8@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    r = await client.post(
+        "/devices/reregister/request",
+        json={"email": "  S8@WKU.ac.kr  "},
+        headers=hdr,
+    )
+    assert r.status_code == 202, r.text
+    # code is stored under the normalized (lowercased) email key
+    code = await get_redis().get("reregister:code:s8@wku.ac.kr")
+    assert code is not None
+
+
+async def test_reregister_request_stores_code_in_redis(client, session):
+    """Happy path: normal email → 202 and a code lands in Redis."""
+    from app.redis_client import get_redis
+
+    user = await seed_user(session, "s9@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    r = await client.post(
+        "/devices/reregister/request", json={"email": "s9@wku.ac.kr"}, headers=hdr
+    )
+    assert r.status_code == 202, r.text
+    code = await get_redis().get("reregister:code:s9@wku.ac.kr")
+    assert code is not None and code.isdigit()
+
+
+async def test_reregister_request_rejects_mismatched_account(client, session):
+    """A valid @wku.ac.kr email that isn't the caller's account → 400."""
+    user = await seed_user(session, "s10@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    r = await client.post(
+        "/devices/reregister/request",
+        json={"email": "someone.else@wku.ac.kr"},
+        headers=hdr,
+    )
+    assert r.status_code == 400
+    assert "match" in r.json()["detail"].lower()
+
+
+async def test_reregister_request_malformed_email_is_422(client, session):
+    """A genuinely malformed email (not just whitespace/case) still fails at
+    validation with a 422 — this is the format the client must avoid sending."""
+    user = await seed_user(session, "s11@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    r = await client.post(
+        "/devices/reregister/request",
+        json={"email": "not-an-email"},
+        headers=hdr,
+    )
+    assert r.status_code == 422

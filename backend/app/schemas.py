@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from enum import Enum
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # ------------------------------------------------------------------- enums
@@ -97,11 +97,31 @@ class RegisterDeviceRequest(BaseModel):
 class ReregisterRequestBody(BaseModel):
     email: EmailStr
 
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, v: object) -> object:
+        # iOS keyboards/autofill often add leading whitespace or capitalize the
+        # first letter, which makes EmailStr reject the value with a 422 before
+        # any business logic runs. Normalize (strip + lower) before validation
+        # so real-device input succeeds; uniqueness/domain checks stay intact.
+        return v.strip().lower() if isinstance(v, str) else v
+
 
 class ReregisterConfirmBody(BaseModel):
     email: EmailStr
     code: str
     new_device_uuid: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
+
+    @field_validator("code", mode="before")
+    @classmethod
+    def _normalize_code(cls, v: object) -> object:
+        # Tolerate whitespace around the copied code.
+        return v.strip() if isinstance(v, str) else v
 
 
 class DeviceBinding(BaseModel):
