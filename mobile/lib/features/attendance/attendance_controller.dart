@@ -55,12 +55,12 @@ class AttendanceState {
 }
 
 class AttendanceController extends StateNotifier<AttendanceState> {
-  AttendanceController(this._ref, {AudioCaptureService? audio})
+  AttendanceController(this._ref, {CaptureService? audio})
       : _audio = audio ?? AudioCaptureService(),
         super(const AttendanceState());
 
   final Ref _ref;
-  final AudioCaptureService _audio;
+  final CaptureService _audio;
 
   Timer? _countdown;
   StreamSubscription<String>? _audioSub;
@@ -103,7 +103,13 @@ class AttendanceController extends StateNotifier<AttendanceState> {
   }
 
   void _maybeSubmit() {
-    if (state.bothCaptured && state.phase == VerifyPhase.capturing) {
+    // Defensive: do not submit with an empty session_id (backend returns 404
+    // "no session"). The session_id must arrive inside the QR payload as
+    // "sessionId|qrToken"; until it does, stay in capturing and wait.
+    final hasSession = state.sessionId != null && state.sessionId!.isNotEmpty;
+    if (state.bothCaptured &&
+        hasSession &&
+        state.phase == VerifyPhase.capturing) {
       unawaited(submit());
     }
   }
@@ -151,6 +157,14 @@ class AttendanceController extends StateNotifier<AttendanceState> {
     await _audio.stop();
     await _audioSub?.cancel();
     state = const AttendanceState();
+  }
+
+  /// Full retry: clear state AND begin a fresh capture (mic + countdown). The
+  /// bare [reset] only zeroed the state, which left the mic/countdown stopped
+  /// so "다시 시도" appeared to do nothing — this is the one the UI must call.
+  Future<void> restart() async {
+    await reset();
+    await startCapture();
   }
 
   @override

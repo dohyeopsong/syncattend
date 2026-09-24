@@ -43,6 +43,10 @@ class _AttendanceVerifyScreenState
   bool _permissionChecked = false;
   PermissionOutcome? _permission;
 
+  /// Bumped on every "다시 시도" so the [MobileScanner] is rebuilt with a fresh
+  /// key and the camera cleanly re-attaches and resumes detecting.
+  int _retryCount = 0;
+
   // Pulse for the "음향" chip while the mic is actively listening.
   late final AnimationController _pulse = AnimationController(
     vsync: this,
@@ -65,6 +69,21 @@ class _AttendanceVerifyScreenState
     if (outcome.granted) {
       await ref.read(attendanceControllerProvider.notifier).startCapture();
     }
+  }
+
+  /// "다시 시도": restart capture (mic + countdown) AND force the QR scanner to
+  /// re-initialise so detection resumes after a completed/failed attempt.
+  Future<void> _retry() async {
+    await ref.read(attendanceControllerProvider.notifier).restart();
+    if (!mounted) return;
+    setState(() => _retryCount++);
+    // Best-effort camera bounce; the changed key also rebuilds the scanner.
+    try {
+      await _scanner.stop();
+    } catch (_) {}
+    try {
+      await _scanner.start();
+    } catch (_) {}
   }
 
   @override
@@ -90,10 +109,13 @@ class _AttendanceVerifyScreenState
       appBar: AppBar(title: const Text('출석 인증')),
       body: Stack(
         children: [
-          // QR scanner runs behind the overlay while capturing.
+          // QR scanner runs behind the overlay while capturing. The ValueKey
+          // (phase + retry count) forces a clean rebuild so detection resumes
+          // after "다시 시도".
           if (state.phase == VerifyPhase.capturing)
             Positioned.fill(
               child: MobileScanner(
+                key: ValueKey('scanner-${state.phase}-$_retryCount'),
                 controller: _scanner,
                 onDetect: (capture) {
                   final code = capture.barcodes.isNotEmpty
@@ -110,49 +132,61 @@ class _AttendanceVerifyScreenState
           else
             const Positioned.fill(child: ColoredBox(color: Colors.white)),
 
-          // Scrim so the overlay reads clearly over the camera feed.
+          // QR reticle overlay: darken everything EXCEPT the centered square
+          // aiming window, with indigo corner markers. Replaces the old uniform
+          // full-screen scrim.
           if (state.phase == VerifyPhase.capturing)
             const Positioned.fill(
-              child: ColoredBox(color: Color(0x66000000)),
+              child: IgnorePointer(child: _QrReticleOverlay()),
             ),
 
-          Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _CountdownRing(
-                    seconds: state.secondsRemaining,
-                    total: 60,
-                    phase: state.phase,
-                    result: state.result,
+          // Signal chips + result sit in the LOWER area so they never overlap
+          // the reticle window (which occupies the upper/center region).
+          SafeArea(
+            child: Column(
+              children: [
+                // Upper region: the status/outcome ring, aligned with the
+                // reticle window while capturing.
+                Expanded(
+                  child: Center(
+                    child: _CountdownRing(
+                      phase: state.phase,
+                      result: state.result,
+                    ),
                   ),
-                  const SizedBox(height: 28),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                ),
+                // Lower region: signal chips + result panel (scrollable).
+                SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      _SignalChip(
-                        label: 'QR',
-                        captured: state.hasQr,
-                        pulse: null,
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _SignalChip(
+                            label: 'QR',
+                            captured: state.hasQr,
+                            pulse: null,
+                          ),
+                          const SizedBox(width: 16),
+                          _SignalChip(
+                            label: '음향',
+                            captured: state.hasAudio,
+                            // Pulse only while listening (capturing + not yet captured).
+                            pulse: (state.phase == VerifyPhase.capturing &&
+                                    !state.hasAudio)
+                                ? _pulse
+                                : null,
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 16),
-                      _SignalChip(
-                        label: '음향',
-                        captured: state.hasAudio,
-                        // Pulse only while listening (capturing + not yet captured).
-                        pulse: (state.phase == VerifyPhase.capturing &&
-                                !state.hasAudio)
-                            ? _pulse
-                            : null,
-                      ),
+                      const SizedBox(height: 20),
+                      _ResultPanel(state: state, onRetry: _retry),
                     ],
                   ),
-                  const SizedBox(height: 24),
-                  _ResultPanel(state: state),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ],
@@ -161,19 +195,96 @@ class _AttendanceVerifyScreenState
   }
 }
 
-/// Large center circular countdown for the 1-minute auth window. When done it
-/// morphs into the outcome ring (green check on success, amber refresh on
-/// failure — never red "absent", per professor-in-the-loop design).
+/// Paints a translucent scrim over the whole screen EXCEPT a centered square
+/// "aiming window" (transparent) with indigo corner markers — the familiar QR
+/// scanner reticle. Sized to [windowFraction] of the shortest side.
+class _QrReticleOverlay extends StatelessWidget {
+  const _QrReticleOverlay();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: Size.infinite,
+      painter: _ReticlePainter(),
+    );
+  }
+}
+
+class _ReticlePainter extends CustomPainter {
+  static const double windowFraction = 0.65;
+  static const double corner = 26; // corner marker arm length
+  static const double cornerStroke = 4;
+
+  Rect _window(Size size) {
+    final side = size.shortestSide * windowFraction;
+    // Bias the window slightly above center so lower chips/result have room.
+    final center = Offset(size.width / 2, size.height * 0.42);
+    return Rect.fromCenter(center: center, width: side, height: side);
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final window = _window(size);
+    final rWindow = RRect.fromRectAndRadius(window, const Radius.circular(16));
+
+    // Darken everything outside the window (even-odd difference).
+    final scrim = Path()
+      ..addRect(Offset.zero & size)
+      ..addRRect(rWindow)
+      ..fillType = PathFillType.evenOdd;
+    canvas.drawPath(scrim, Paint()..color = const Color(0x99000000));
+
+    // Indigo corner markers.
+    final markerPaint = Paint()
+      ..color = const Color(0xFF4F46E5)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = cornerStroke
+      ..strokeCap = StrokeCap.round;
+    final l = window.left, t = window.top, r = window.right, b = window.bottom;
+    // Top-left
+    canvas.drawPath(
+        Path()
+          ..moveTo(l, t + corner)
+          ..lineTo(l, t)
+          ..lineTo(l + corner, t),
+        markerPaint);
+    // Top-right
+    canvas.drawPath(
+        Path()
+          ..moveTo(r - corner, t)
+          ..lineTo(r, t)
+          ..lineTo(r, t + corner),
+        markerPaint);
+    // Bottom-left
+    canvas.drawPath(
+        Path()
+          ..moveTo(l, b - corner)
+          ..lineTo(l, b)
+          ..lineTo(l + corner, b),
+        markerPaint);
+    // Bottom-right
+    canvas.drawPath(
+        Path()
+          ..moveTo(r - corner, b)
+          ..lineTo(r, b)
+          ..lineTo(r, b - corner),
+        markerPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _ReticlePainter oldDelegate) => false;
+}
+
+/// Large center status ring. While capturing it shows an INDETERMINATE spinner
+/// ("인증 대기 중") — no numeric countdown (the local timer was UX-only and the
+/// server owns the real window). When done it morphs into the outcome ring
+/// (green check on success, amber refresh on failure — never red "absent").
 class _CountdownRing extends StatelessWidget {
   const _CountdownRing({
-    required this.seconds,
-    required this.total,
     required this.phase,
     required this.result,
   });
 
-  final int seconds;
-  final int total;
   final VerifyPhase phase;
   final VerifyResult? result;
 
@@ -183,9 +294,9 @@ class _CountdownRing extends StatelessWidget {
     final success = result?.status == VerifyStatus.present;
     final submitting = phase == VerifyPhase.submitting;
 
-    // Ring color: indigo while counting, green on success, amber otherwise.
     Color ring;
     Widget center;
+    bool indeterminate = false;
     if (done && success) {
       ring = AppColors.success;
       center = const _RingCenter(
@@ -202,23 +313,22 @@ class _CountdownRing extends StatelessWidget {
       );
     } else if (submitting) {
       ring = AppColors.indigo;
+      indeterminate = true;
       center = const _RingCenter(
         icon: Icons.hourglass_bottom,
         color: AppColors.indigo,
         label: '확인 중',
       );
     } else {
-      final expired = seconds <= 0;
-      ring = expired ? AppColors.warning : AppColors.indigo;
-      center = _RingCenter(
-        big: expired ? '—' : '$seconds',
-        color: AppColors.foreground,
-        label: expired ? '창 종료' : '초 남음',
+      // Capturing / idle: indeterminate "waiting" ring, NO number.
+      ring = AppColors.indigo;
+      indeterminate = true;
+      center = const _RingCenter(
+        icon: Icons.qr_code_scanner,
+        color: AppColors.indigo,
+        label: '인증 대기 중',
       );
     }
-
-    final fraction =
-        (done || submitting) ? 1.0 : (seconds.clamp(0, total) / total);
 
     return SizedBox(
       width: 200,
@@ -230,7 +340,9 @@ class _CountdownRing extends StatelessWidget {
             width: 200,
             height: 200,
             child: CircularProgressIndicator(
-              value: (done && !success) ? 1.0 : fraction,
+              // Indeterminate (spinning) while waiting/submitting; full ring
+              // once resolved.
+              value: indeterminate ? null : 1.0,
               strokeWidth: 10,
               backgroundColor: AppColors.border,
               valueColor: AlwaysStoppedAnimation<Color>(ring),
@@ -246,13 +358,11 @@ class _CountdownRing extends StatelessWidget {
 class _RingCenter extends StatelessWidget {
   const _RingCenter({
     this.icon,
-    this.big,
     required this.color,
     required this.label,
   });
 
   final IconData? icon;
-  final String? big;
   final Color color;
   final String label;
 
@@ -262,10 +372,6 @@ class _RingCenter extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (icon != null) Icon(icon, size: 56, color: color),
-        if (big != null)
-          Text(big!,
-              style: TextStyle(
-                  fontSize: 48, fontWeight: FontWeight.w700, color: color)),
         const SizedBox(height: 4),
         Text(label,
             style: const TextStyle(
@@ -334,12 +440,13 @@ class _SignalChip extends StatelessWidget {
 
 /// Below the ring: submit spinner, soft error text, result detail, and the
 /// amber "다시 시도" action. Failure is presented as retry, not as absence.
-class _ResultPanel extends ConsumerWidget {
-  const _ResultPanel({required this.state});
+class _ResultPanel extends StatelessWidget {
+  const _ResultPanel({required this.state, required this.onRetry});
   final AttendanceState state;
+  final Future<void> Function() onRetry;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final showRetry = state.phase == VerifyPhase.done ||
         state.phase == VerifyPhase.error;
     return Card(
@@ -372,8 +479,7 @@ class _ResultPanel extends ConsumerWidget {
               FilledButton.icon(
                 style: FilledButton.styleFrom(
                     backgroundColor: AppColors.warning),
-                onPressed: () =>
-                    ref.read(attendanceControllerProvider.notifier).reset(),
+                onPressed: () => onRetry(),
                 icon: const Icon(Icons.refresh),
                 label: const Text('다시 시도'),
               ),

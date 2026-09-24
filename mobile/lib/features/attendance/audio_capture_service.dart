@@ -5,6 +5,20 @@ import 'package:record/record.dart';
 
 import 'audio_nonce_decoder.dart';
 
+/// Minimal capture abstraction the attendance controller depends on. Kept small
+/// (start/stop/dispose) so tests can inject a pure fake without a real mic /
+/// platform binding. [AudioCaptureService] is the production implementation.
+abstract class CaptureService {
+  /// Starts capture and returns a stream of decoded nonce strings.
+  Future<Stream<String>> start({int hopsPerSymbol});
+
+  /// Stops capture (idempotent).
+  Future<void> stop();
+
+  /// Releases resources.
+  Future<void> dispose();
+}
+
 /// Captures the microphone as a raw PCM16 stream and feeds fixed-size windows to
 /// the [AudioNonceDecoder]. Mono, [sampleRate] Hz.
 ///
@@ -16,7 +30,7 @@ import 'audio_nonce_decoder.dart';
 /// converter entirely, preserving the ultrasonic band. 20 kHz is well within
 /// 48 kHz Nyquist (24 kHz). The decoder is initialised at the same rate so its
 /// FFT bins map to the correct absolute slot frequencies.
-class AudioCaptureService {
+class AudioCaptureService implements CaptureService {
   AudioCaptureService({
     AudioRecorder? recorder,
     AudioNonceDecoder? decoder,
@@ -49,6 +63,7 @@ class AudioCaptureService {
   /// no audio and decode silently fails), then uses the REAL-TIME decoder so a
   /// nonce is emitted as soon as a frame is captured (the live mic stream never
   /// closes, so the buffer-until-close decoder would deadlock on device).
+  @override
   Future<Stream<String>> start({int hopsPerSymbol = 4}) async {
     // 1) Permission — request explicitly; iOS shows the prompt on first call.
     final granted = await _recorder.hasPermission();
@@ -133,6 +148,7 @@ class AudioCaptureService {
     );
   }
 
+  @override
   Future<void> stop() async {
     await _sub?.cancel();
     _sub = null;
@@ -143,6 +159,7 @@ class AudioCaptureService {
     }
   }
 
+  @override
   Future<void> dispose() async {
     await stop();
     await _recorder.dispose();
