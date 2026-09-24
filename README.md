@@ -72,6 +72,10 @@ single-use), cross-verification, 1-min auth window (open/extend/close), server u
 (one attendance per account & per device UUID per session), attendance aggregation +
 Delta batch close, and SSE risk-warning streams.
 
+## License
+
+Released under the [MIT License](./LICENSE) © 2026 Syncattend Team.
+
 ---
 
 Created: 2026-09-17 · Scaffold: 2026-09-24 (V3)
