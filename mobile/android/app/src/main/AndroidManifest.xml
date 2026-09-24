@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Attendance layered defense: QR (camera) + ultrasonic audio nonce (mic).
+         Network for contract API + SSE. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
         android:label="syncattend_mobile"
         android:name="${applicationName}"

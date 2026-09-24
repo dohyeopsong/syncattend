@@ -4,6 +4,10 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>출석 인증 QR 코드를 스캔하기 위해 카메라를 사용합니다.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>출석 인증용 초음파 음향 토큰을 감지하기 위해 마이크를 사용합니다.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

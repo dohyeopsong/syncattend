@@ -6,9 +6,11 @@ import FlutterMacOS
 import Foundation
 
 import flutter_secure_storage_macos
-import flutter_udid
+import mobile_scanner
+import record_darwin
 
 func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   FlutterSecureStoragePlugin.register(with: registry.registrar(forPlugin: "FlutterSecureStoragePlugin"))
-  FlutterUdidPlugin.register(with: registry.registrar(forPlugin: "FlutterUdidPlugin"))
+  MobileScannerPlugin.register(with: registry.registrar(forPlugin: "MobileScannerPlugin"))
+  RecordPlugin.register(with: registry.registrar(forPlugin: "RecordPlugin"))
 }
