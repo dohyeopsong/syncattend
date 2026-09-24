@@ -6,6 +6,26 @@ import '../../models/contract_models.dart';
 import 'attendance_controller.dart';
 import 'permissions_service.dart';
 
+/// User-facing message for each of the 5 server rejection reasons. Kept as a
+/// top-level pure function so the mapping can be unit-tested (each reason must
+/// map to a distinct, non-empty message) independently of the widget tree.
+String verifyReasonMessage(VerifyReason r) {
+  switch (r) {
+    case VerifyReason.windowClosed:
+      return '인증 창 종료';
+    case VerifyReason.crossVerifyFailed:
+      return 'QR×음향 교차검증 실패';
+    case VerifyReason.nonceReused:
+      return '토큰 재사용 감지';
+    case VerifyReason.deviceMismatch:
+      return '기기 UUID 불일치';
+    case VerifyReason.duplicateAttendance:
+      return '중복 출석';
+    case VerifyReason.none:
+      return '';
+  }
+}
+
 class AttendanceVerifyScreen extends ConsumerStatefulWidget {
   const AttendanceVerifyScreen({super.key});
 
@@ -197,26 +217,9 @@ class _ResultView extends StatelessWidget {
       case VerifyStatus.pending:
         return '대기 중 (교수 확인 필요)';
       case VerifyStatus.rejected:
-        return '거부됨: ${_reasonText(result.reason)}';
+        return '거부됨: ${verifyReasonMessage(result.reason)}';
       case VerifyStatus.unknown:
         return '알 수 없는 상태';
-    }
-  }
-
-  String _reasonText(VerifyReason r) {
-    switch (r) {
-      case VerifyReason.windowClosed:
-        return '인증 창 종료';
-      case VerifyReason.crossVerifyFailed:
-        return 'QR×음향 교차검증 실패';
-      case VerifyReason.nonceReused:
-        return '토큰 재사용 감지';
-      case VerifyReason.deviceMismatch:
-        return '기기 UUID 불일치';
-      case VerifyReason.duplicateAttendance:
-        return '중복 출석';
-      case VerifyReason.none:
-        return '';
     }
   }
 

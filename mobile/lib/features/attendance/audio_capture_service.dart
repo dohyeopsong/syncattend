@@ -25,8 +25,13 @@ class AudioCaptureService {
   StreamController<Float64List>? _windows;
 
   /// Starts capture and returns a stream of decoded nonce strings.
-  Future<Stream<String>> start() async {
+  ///
+  /// Emits OVERSAMPLED overlapping windows (hop = symbol / [hopsPerSymbol]) so the
+  /// robust decoder can recover symbols even when capture is not phase-aligned to
+  /// the emitter's symbol boundaries (see TR-0 jitter finding).
+  Future<Stream<String>> start({int hopsPerSymbol = 4}) async {
     final windowSamples = (sampleRate * decoder.symbolMs) ~/ 1000;
+    final hopSamples = (windowSamples ~/ hopsPerSymbol).clamp(1, windowSamples);
     _windows = StreamController<Float64List>();
 
     final pcmStream = await _recorder.startStream(
@@ -45,14 +50,19 @@ class AudioCaptureService {
         final sample = bytes.getInt16(i, Endian.little);
         buffer.add(sample / 32768.0);
       }
+      // Slide a window of `windowSamples` forward by `hopSamples` each step so
+      // consecutive windows overlap (oversampling).
       while (buffer.length >= windowSamples) {
         final window = Float64List.fromList(buffer.sublist(0, windowSamples));
-        buffer.removeRange(0, windowSamples);
+        buffer.removeRange(0, hopSamples);
         _windows?.add(window);
       }
     });
 
-    return decoder.decodeStream(_windows!.stream);
+    return decoder.decodeStreamOversampled(
+      _windows!.stream,
+      hopsPerSymbol: hopsPerSymbol,
+    );
   }
 
   Future<void> stop() async {

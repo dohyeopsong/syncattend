@@ -27,7 +27,7 @@ class AudioNonceDecoder {
     this.toneSlots = 16,
     this.symbolMs = 60,
     this.detectionThreshold = 4.0,
-  }) : _fft = FFT(_nextPow2((sampleRate * symbolMs) ~/ 1000));
+  }) : _fft = FFT(_fftSizeForSymbol((sampleRate * symbolMs) ~/ 1000));
 
   final int sampleRate;
   final double bandLowHz;
@@ -136,9 +136,96 @@ class AudioNonceDecoder {
     return sb.toString();
   }
 
-  static int _nextPow2(int n) {
+  /// Robust variant of [decodeStream] for OVERSAMPLED input, where the capture
+  /// layer emits [hopsPerSymbol] overlapping windows per symbol (hop =
+  /// symbol/[hopsPerSymbol]). A single non-overlapping window per symbol is
+  /// fragile under symbol-boundary jitter (measured ~42%). This variant is
+  /// alignment-free: it segments the oversampled slot readings into RUNS of the
+  /// same slot (each sustained tone = one run ≈ [hopsPerSymbol] readings long),
+  /// which naturally recovers symbol boundaries no matter where capture started.
+  ///
+  /// PROTOCOL NOTE (report to owner C): run segmentation cannot distinguish two
+  /// identical adjacent nibbles from one longer tone. The emitter must therefore
+  /// either (a) insert a short guard/marker tone between symbols, or (b) use an
+  /// encoding where adjacent symbols differ. Until then, run length is also used
+  /// to split unusually long runs (≈2× a symbol) into repeated symbols as a
+  /// best-effort heuristic.
+  ///
+  /// This is the reliability hook called out in TR-0 for real-classroom use; it
+  /// keeps the same framing (highest slot = start marker, then 8 hex nibbles).
+  Stream<String> decodeStreamOversampled(
+    Stream<Float64List> windows, {
+    int hopsPerSymbol = 4,
+    int nonceNibbles = 8,
+  }) async* {
+    final markerSlot = toneSlots - 1;
+    final readings = <int?>[];
+    await for (final window in windows) {
+      readings.add(decodeSlot(window));
+    }
+
+    // Segment into runs of equal slot, ignoring nulls (silence/gaps break runs).
+    final runs = <({int slot, int len})>[];
+    int? cur;
+    var len = 0;
+    void flush() {
+      if (cur != null && len > 0) runs.add((slot: cur!, len: len));
+      cur = null;
+      len = 0;
+    }
+
+    for (final r in readings) {
+      if (r == null) {
+        flush();
+        continue;
+      }
+      if (r == cur) {
+        len++;
+      } else {
+        flush();
+        cur = r;
+        len = 1;
+      }
+    }
+    flush();
+
+    // A valid symbol run should be roughly one symbol long. Runs much shorter
+    // than a symbol are transition/edge artifacts and are dropped. Runs much
+    // longer are split into repeats (best-effort; see PROTOCOL NOTE).
+    final minRun = (hopsPerSymbol / 2).floor().clamp(1, hopsPerSymbol);
+    final symbols = <int>[];
+    var receiving = false;
+
+    void addSlot(int slot, int runLen) {
+      final repeats = (runLen / hopsPerSymbol).round().clamp(1, 8);
+      for (var i = 0; i < repeats; i++) {
+        if (slot == markerSlot) {
+          receiving = true;
+          symbols.clear();
+        } else if (receiving) {
+          symbols.add(slot);
+        }
+      }
+    }
+
+    for (final run in runs) {
+      if (run.len < minRun && run.slot != markerSlot) continue;
+      addSlot(run.slot, run.len);
+      if (symbols.length >= nonceNibbles) {
+        yield _symbolsToHex(symbols.sublist(0, nonceNibbles));
+        return;
+      }
+    }
+  }
+
+  /// Largest power-of-two FFT size that still fits within one symbol window of
+  /// [samplesPerSymbol] samples. Using a floor (not ceil) power of two ensures a
+  /// full symbol produces a complete FFT frame — otherwise the capture service,
+  /// which emits windows of `samplesPerSymbol`, would never satisfy the frame
+  /// size and every decode would return null.
+  static int _fftSizeForSymbol(int samplesPerSymbol) {
     var p = 1;
-    while (p < n) {
+    while (p << 1 <= samplesPerSymbol) {
       p <<= 1;
     }
     return p;
