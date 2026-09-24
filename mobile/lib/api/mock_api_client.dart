@@ -51,6 +51,17 @@ class MockApiClient implements ApiClient {
   }
 
   @override
+  Future<UserOut> getMe() async {
+    await _latency();
+    return const UserOut(
+      id: 'mock-student',
+      email: 'student@wku.ac.kr',
+      role: Role.student,
+      name: '홍길동',
+    );
+  }
+
+  @override
   Future<DeviceBinding> registerDevice(String deviceUuid) async {
     await _latency();
     if (_boundUuid == null) {
@@ -161,6 +172,39 @@ class MockApiClient implements ApiClient {
         message: 'Attendance recorded (mock).',
       ),
     );
+  }
+
+  @override
+  Future<List<MyAttendanceItem>> getMyAttendance() async {
+    await _latency();
+    final now = DateTime.now();
+    return [
+      MyAttendanceItem(
+        recordId: 'r1',
+        sessionId: 's-101',
+        courseId: 'c-ds',
+        courseName: '자료구조',
+        status: AttendanceStatus.present,
+        verifiedAt: now.subtract(const Duration(days: 1)),
+        sessionOpenedAt: now.subtract(const Duration(days: 1, minutes: 2)),
+      ),
+      MyAttendanceItem(
+        recordId: 'r2',
+        sessionId: 's-102',
+        courseId: 'c-os',
+        courseName: '운영체제',
+        status: AttendanceStatus.absent,
+        sessionOpenedAt: now.subtract(const Duration(days: 3)),
+      ),
+      MyAttendanceItem(
+        recordId: 'r3',
+        sessionId: 's-103',
+        courseId: 'c-net',
+        courseName: '네트워크',
+        status: AttendanceStatus.pending,
+        sessionOpenedAt: now.subtract(const Duration(hours: 2)),
+      ),
+    ];
   }
 
   @override

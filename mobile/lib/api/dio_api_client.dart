@@ -105,6 +105,16 @@ class DioApiClient implements ApiClient {
   }
 
   @override
+  Future<UserOut> getMe() async {
+    try {
+      final res = await _dio.get('/auth/me');
+      return UserOut.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
   Future<DeviceBinding> registerDevice(String deviceUuid) async {
     try {
       final res = await _dio
@@ -164,6 +174,19 @@ class DioApiClient implements ApiClient {
       if (e.response?.statusCode == 409 && data is Map<String, dynamic>) {
         return VerifyResult.fromJson(data);
       }
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<List<MyAttendanceItem>> getMyAttendance() async {
+    try {
+      final res = await _dio.get('/me/attendance');
+      final list = (res.data as List<dynamic>)
+          .map((e) => MyAttendanceItem.fromJson(e as Map<String, dynamic>))
+          .toList();
+      return list;
+    } on DioException catch (e) {
       _rethrowAsApiError(e);
     }
   }

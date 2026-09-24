@@ -8,6 +8,10 @@ abstract class ApiClient {
   Future<TokenPair> login({required String email, required String password});
   Future<TokenPair> refresh(String refreshToken);
 
+  /// Authenticated user's profile (GET /auth/me) — resolves the student's own
+  /// id for SSE subscription and history without decoding the JWT.
+  Future<UserOut> getMe();
+
   // devices
   /// Binds the app-generated UUID. Throws [ApiError] with statusCode 409 when a
   /// binding conflict requires email re-registration.
@@ -22,6 +26,9 @@ abstract class ApiClient {
 
   // attendance
   Future<VerifyResult> verifyAttendance(VerifyRequest request);
+
+  /// Authenticated student's own attendance history (GET /me/attendance).
+  Future<List<MyAttendanceItem>> getMyAttendance();
 
   /// Student risk-warning SSE stream (/sse/students/{id}).
   Stream<RiskWarning> riskWarnings(String studentId);

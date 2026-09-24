@@ -273,3 +273,63 @@ class ApiError implements Exception {
   @override
   String toString() => 'ApiError($statusCode, $code): $detail';
 }
+
+
+/// #/components/schemas/UserOut — authenticated user's profile (GET /auth/me).
+class UserOut {
+  const UserOut({
+    required this.id,
+    required this.email,
+    required this.role,
+    this.name,
+  });
+
+  final String id;
+  final String email;
+  final Role role;
+  final String? name;
+
+  factory UserOut.fromJson(Map<String, dynamic> json) => UserOut(
+        id: json['id'] as String? ?? '',
+        email: json['email'] as String? ?? '',
+        role: _roleFromString(json['role'] as String?),
+        name: json['name'] as String?,
+      );
+}
+
+/// #/components/schemas/MyAttendanceItem — one row of the student's own
+/// attendance history with course context (GET /me/attendance).
+class MyAttendanceItem {
+  const MyAttendanceItem({
+    required this.recordId,
+    required this.sessionId,
+    required this.courseId,
+    required this.courseName,
+    required this.status,
+    this.verifiedAt,
+    this.sessionOpenedAt,
+  });
+
+  final String recordId;
+  final String sessionId;
+  final String courseId;
+  final String courseName;
+  final AttendanceStatus status;
+  final DateTime? verifiedAt;
+  final DateTime? sessionOpenedAt;
+
+  factory MyAttendanceItem.fromJson(Map<String, dynamic> json) =>
+      MyAttendanceItem(
+        recordId: json['record_id'] as String? ?? '',
+        sessionId: json['session_id'] as String? ?? '',
+        courseId: json['course_id'] as String? ?? '',
+        courseName: json['course_name'] as String? ?? '',
+        status: attendanceStatusFromString(json['status'] as String?),
+        verifiedAt: json['verified_at'] != null
+            ? DateTime.tryParse(json['verified_at'] as String)
+            : null,
+        sessionOpenedAt: json['session_opened_at'] != null
+            ? DateTime.tryParse(json['session_opened_at'] as String)
+            : null,
+      );
+}

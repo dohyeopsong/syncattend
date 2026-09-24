@@ -171,10 +171,13 @@ success rate), then fill the checklist rates above.
 
 
 ## Contract gaps to report to Owner A
-- No student-facing `GET` for **my attendance history** or **timetable** or
-  **inquiry** threads. These screens use local placeholders until endpoints exist.
-- SSE student id: `/sse/students/{id}` needs the authenticated student's id; a
-  `GET /me` (or id in the token/login response) would remove the `"me"` placeholder.
+- ✅ RESOLVED (A, 2026-09-25): `GET /auth/me` (getMe → UserOut) and
+  `GET /me/attendance` (getMyAttendance → MyAttendanceItem[]) added. Mobile now
+  resolves the real student id (`studentIdProvider`) for `/sse/students/{id}`
+  and loads the history screen from the endpoint — the `"me"` placeholder and
+  the local attendance placeholder are removed.
+- Still local placeholders (no contract endpoint yet): **timetable** and
+  **inquiry** threads.
 
 ## Manual verification (record results here)
 - [ ] Fresh install → login → device auto-registers (mock: any `@wku.ac.kr` + pw).

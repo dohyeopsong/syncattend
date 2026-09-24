@@ -95,6 +95,25 @@ void main() {
       expect(res.status, VerifyStatus.rejected);
       expect(res.reason, VerifyReason.deviceMismatch);
     });
+
+    test('getMe returns the student profile with an id', () async {
+      final api = MockApiClient();
+      final me = await api.getMe();
+      expect(me.role, Role.student);
+      expect(me.id, isNotEmpty);
+      expect(me.email, endsWith('@wku.ac.kr'));
+    });
+
+    test('getMyAttendance returns history rows with course context', () async {
+      final api = MockApiClient();
+      final items = await api.getMyAttendance();
+      expect(items, isNotEmpty);
+      expect(items.first.courseName, isNotEmpty);
+      expect(items.first.sessionId, isNotEmpty);
+      // status enum covers the present/absent/pending spread.
+      final statuses = items.map((e) => e.status).toSet();
+      expect(statuses.contains(AttendanceStatus.present), isTrue);
+    });
   });
 
   group('AudioNonceDecoder', () {

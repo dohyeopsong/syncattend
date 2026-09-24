@@ -1,46 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/providers.dart';
 import '../../models/contract_models.dart';
 
-/// My attendance status view.
-///
-/// CONTRACT GAP (report to owner A): openapi.yaml currently exposes no
-/// student-facing GET for "my attendance history" (only professor session
-/// aggregates + PATCH). Until a contract endpoint exists, this renders local /
-/// placeholder data so the screen and navigation are complete.
-///
-/// TODO(A-dep, attendance history): when A adds a student GET (e.g.
-///   GET /students/me/attendance or GET /attendance/mine returning
-///   [AttendanceRecord]), do:
-///     1. add `Future<List<AttendanceRecord>> myAttendance()` to ApiClient
-///        (+ DioApiClient real call, + MockApiClient sample),
-///     2. convert this widget to Consumer + a FutureProvider,
-///     3. delete `_placeholder` below.
-///   Do NOT edit contracts/openapi.yaml here — request the endpoint from A.
-class MyAttendanceScreen extends StatelessWidget {
-  const MyAttendanceScreen({super.key});
+/// Loads the authenticated student's attendance history from GET /me/attendance.
+final myAttendanceProvider = FutureProvider<List<MyAttendanceItem>>(
+  (ref) => ref.watch(apiClientProvider).getMyAttendance(),
+);
 
-  static final _placeholder = <AttendanceRecord>[
-    AttendanceRecord(
-      recordId: 'r1',
-      sessionId: 's-101',
-      studentId: 'me',
-      status: AttendanceStatus.present,
-      verifiedAt: DateTime.now().subtract(const Duration(days: 1)),
-    ),
-    const AttendanceRecord(
-      recordId: 'r2',
-      sessionId: 's-102',
-      studentId: 'me',
-      status: AttendanceStatus.absent,
-    ),
-    const AttendanceRecord(
-      recordId: 'r3',
-      sessionId: 's-103',
-      studentId: 'me',
-      status: AttendanceStatus.pending,
-    ),
-  ];
+/// My attendance status view — real data from GET /me/attendance (owner A).
+class MyAttendanceScreen extends ConsumerWidget {
+  const MyAttendanceScreen({super.key});
 
   Color _statusColor(AttendanceStatus s) {
     switch (s) {
@@ -56,19 +27,53 @@ class MyAttendanceScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return ListView.separated(
-      itemCount: _placeholder.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (context, i) {
-        final r = _placeholder[i];
-        return ListTile(
-          leading: Icon(Icons.circle, color: _statusColor(r.status), size: 14),
-          title: Text('세션 ${r.sessionId}'),
-          subtitle: Text(r.verifiedAt != null
-              ? '인증: ${r.verifiedAt}'
-              : '미인증'),
-          trailing: Text(r.status.name),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(myAttendanceProvider);
+    return async.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (e, _) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, color: Colors.red, size: 40),
+              const SizedBox(height: 12),
+              Text('출결 이력을 불러오지 못했습니다.\n$e',
+                  textAlign: TextAlign.center),
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: () => ref.invalidate(myAttendanceProvider),
+                child: const Text('다시 시도'),
+              ),
+            ],
+          ),
+        ),
+      ),
+      data: (items) {
+        if (items.isEmpty) {
+          return const Center(child: Text('출결 이력이 없습니다.'));
+        }
+        return RefreshIndicator(
+          onRefresh: () async => ref.invalidate(myAttendanceProvider),
+          child: ListView.separated(
+            itemCount: items.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, i) {
+              final r = items[i];
+              return ListTile(
+                leading: Icon(Icons.circle,
+                    color: _statusColor(r.status), size: 14),
+                title: Text(r.courseName.isEmpty
+                    ? '세션 ${r.sessionId}'
+                    : r.courseName),
+                subtitle: Text(r.verifiedAt != null
+                    ? '인증: ${r.verifiedAt}'
+                    : '미인증'),
+                trailing: Text(r.status.name),
+              );
+            },
+          ),
         );
       },
     );
