@@ -11,7 +11,12 @@ import 'package:fftea/fftea.dart';
 /// (frequency map, symbol length, encoding) MUST be agreed with owner C.
 ///
 /// PROTOCOL (CONFIRMED with owner A's contract + owner C's emitter, 2026-09-25):
-///  - Band: 18–20 kHz split into N tone slots (default 16 → 4 bits/symbol).
+///  - Band: 17–18.5 kHz split into N tone slots (default 16 → 4 bits/symbol).
+///    (Lowered from 18–20 kHz after on-device TR-0 testing: laptop speakers
+///    radiate almost nothing at 19–20 kHz, so the frame's start-marker slot
+///    never reached the phone and decode was 0%. A speaker-response probe showed
+///    17–18 kHz is emitted strongly; a physical loopback battery decodes 100%
+///    at 17–18.5 kHz. 17 kHz avoids the audible/annoying 16 kHz.)
 ///  - Symbol length: [symbolMs] ms per symbol (default 60ms).
 ///  - Framing: a start marker tone (highest slot, 0xF) precedes the nonce
 ///    symbols. Because slot 15 == 0xF is reserved as the marker, the nonce
@@ -32,9 +37,9 @@ import 'package:fftea/fftea.dart';
 /// parameterised so only [bandLowHz]/[bandHighHz] need to change.
 class AudioNonceDecoder {
   AudioNonceDecoder({
-    this.sampleRate = 44100,
-    this.bandLowHz = 18000,
-    this.bandHighHz = 20000,
+    this.sampleRate = 48000,
+    this.bandLowHz = 17000,
+    this.bandHighHz = 18500,
     this.toneSlots = 16,
     this.symbolMs = 60,
     this.detectionThreshold = 4.0,
@@ -115,6 +120,41 @@ class AudioNonceDecoder {
     if (bestSlot < 0) return null;
     if (median > 0 && bestMag < median * detectionThreshold) return null;
     return bestSlot;
+  }
+
+  /// Diagnostic: returns the strongest slot in the band, its magnitude, the band
+  /// median, and their ratio — WITHOUT applying the detection threshold. Lets
+  /// on-device logging distinguish "no ultrasonic energy at all" (bestMag≈0)
+  /// from "energy present but below threshold" (ratio between 1 and
+  /// [detectionThreshold]) from "clean tone" (ratio ≫ threshold). This is how we
+  /// decide whether the fix is louder/closer emission or a lower threshold.
+  ({int slot, double bestMag, double median, double ratio})? diagnoseBand(
+      Float64List window) {
+    if (window.length < _windowSize) return null;
+    final frame = Float64List(_windowSize);
+    for (var i = 0; i < _windowSize; i++) {
+      final w = 0.5 - 0.5 * math.cos(2 * math.pi * i / (_windowSize - 1));
+      frame[i] = window[i] * w;
+    }
+    final mags = _fft.realFft(frame).magnitudes();
+    final binHz = sampleRate / _windowSize;
+    final lowBin = (bandLowHz / binHz).floor().clamp(0, mags.length - 1);
+    final highBin = (bandHighHz / binHz).ceil().clamp(0, mags.length - 1);
+    if (highBin <= lowBin) return null;
+    final bandMags = mags.sublist(lowBin, highBin).toList()..sort();
+    final median = bandMags.isEmpty ? 0.0 : bandMags[bandMags.length ~/ 2];
+    var bestSlot = -1;
+    var bestMag = 0.0;
+    for (var slot = 0; slot < toneSlots; slot++) {
+      final bin = (slotFrequency(slot) / binHz).round().clamp(0, mags.length - 1);
+      final m = mags[bin];
+      if (m > bestMag) {
+        bestMag = m;
+        bestSlot = slot;
+      }
+    }
+    final ratio = median > 0 ? bestMag / median : 0.0;
+    return (slot: bestSlot, bestMag: bestMag, median: median, ratio: ratio);
   }
 
   /// Consumes a stream of PCM sample windows and yields decoded nonce strings
@@ -238,6 +278,94 @@ class AudioNonceDecoder {
       if (symbols.length >= nonceNibbles) {
         yield _symbolsToHex(symbols.sublist(0, nonceNibbles));
         return;
+      }
+    }
+  }
+
+  /// REAL-TIME variant of [decodeStreamOversampled] for a LIVE, never-ending
+  /// microphone stream.
+  ///
+  /// [decodeStreamOversampled] buffers ALL readings with `await for` and only
+  /// segments/decodes AFTER the input stream closes — correct for a finite
+  /// (file/synthetic) stream, but a live mic stream never closes on its own, so
+  /// it would never emit until [stop] closes the stream. On device that creates
+  /// a deadlock (the caller stops the mic only after a nonce arrives, but a
+  /// nonce arrives only after the mic stops). This variant runs the same
+  /// run-segmentation as an ONLINE state machine, emitting a nonce the moment a
+  /// full frame (marker + [nonceNibbles] nibbles) is captured, without waiting
+  /// for the stream to end.
+  ///
+  /// [onSlot] is an optional diagnostic hook invoked for every window with the
+  /// detected slot (or null for silence) — used for on-device logging to see
+  /// whether the ultrasonic band is actually reaching the decoder.
+  Stream<String> decodeStreamRealtime(
+    Stream<Float64List> windows, {
+    int hopsPerSymbol = 4,
+    int nonceNibbles = defaultNonceNibbles,
+    void Function(int? slot)? onSlot,
+  }) async* {
+    final marker = markerSlot;
+    // A sustained tone spans ~[hopsPerSymbol] oversampled windows. We treat a
+    // run as one confirmed symbol once it reaches [confirmLen] consecutive equal
+    // readings — emitting IMMEDIATELY rather than waiting for the run to END
+    // (slot change / silence). Waiting-for-end would drop the LAST nibble of a
+    // frame until the next frame's marker arrived, and the caller stops the mic
+    // as soon as a nonce arrives — so the frame must complete online.
+    final confirmLen = (hopsPerSymbol / 2).round().clamp(1, hopsPerSymbol);
+
+    int? curSlot;
+    var curLen = 0;
+    var committedInRun = 0; // symbols already emitted for the current run
+    final symbols = <int>[];
+    var receiving = false;
+
+    // Feeds one confirmed symbol into the frame machine; returns a completed
+    // nonce if the frame just filled, else null.
+    String? feedSymbol(int slot) {
+      if (slot == marker) {
+        receiving = true;
+        symbols.clear();
+        return null;
+      }
+      if (!receiving) return null;
+      symbols.add(slot);
+      if (symbols.length >= nonceNibbles) {
+        final hex = _symbolsToHex(symbols.sublist(0, nonceNibbles));
+        symbols.clear();
+        receiving = false;
+        return hex;
+      }
+      return null;
+    }
+
+    await for (final window in windows) {
+      final slot = decodeSlot(window);
+      if (onSlot != null) onSlot(slot);
+
+      if (slot == curSlot) {
+        curLen++;
+      } else {
+        curSlot = slot;
+        curLen = slot == null ? 0 : 1;
+        committedInRun = 0;
+      }
+
+      // Emit confirmed symbols online. A run of length L represents
+      // round(L / hopsPerSymbol) sustained tones (≥1 once it clears the first
+      // half-symbol) — this recovers IDENTICAL ADJACENT nibbles (e.g. `aa`),
+      // which the silent inter-symbol guard cannot separate at this window size.
+      // We commit one symbol per completed [hopsPerSymbol] block, at most once
+      // per block, so a long run yields the right repeat count without waiting
+      // for the run to end (which would drop the frame's last nibble online).
+      if (slot != null) {
+        final due = curLen < confirmLen
+            ? 0
+            : 1 + ((curLen - confirmLen) ~/ hopsPerSymbol);
+        while (committedInRun < due) {
+          committedInRun++;
+          final hex = feedSymbol(slot);
+          if (hex != null) yield hex;
+        }
       }
     }
   }

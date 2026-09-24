@@ -4,7 +4,11 @@
 // It MUST stay protocol-compatible with the Flutter decoder at
 //   mobile/lib/features/attendance/audio_nonce_decoder.dart
 // (READ-ONLY reference; owned by B). Confirmed protocol:
-//   - Band 18000–20000 Hz, 16 tone slots (4 bits/symbol).
+//   - Band 17000–18500 Hz, 16 tone slots (4 bits/symbol). (Lowered from
+//     18000–20000 Hz: on-device TR-0 testing found laptop speakers barely
+//     radiate 19–20 kHz, so the phone never saw the start marker — decode 0%.
+//     17–18.5 kHz is emitted strongly and decodes 100% in physical loopback;
+//     17 kHz keeps the annoying 16 kHz out.)
 //   - Symbol length 60 ms; slot 15 (highest) = start marker.
 //   - Nonce = hex nibbles, each nibble (0..14) = one tone slot; frame is
 //     [marker, n0, n1, ... n7].
@@ -35,8 +39,8 @@ export interface EmitterProtocol {
 
 export const DEFAULT_PROTOCOL: EmitterProtocol = {
   sampleRate: 44100,
-  bandLowHz: 18000,
-  bandHighHz: 20000,
+  bandLowHz: 17000,
+  bandHighHz: 18500,
   toneSlots: 16,
   symbolMs: 60,
 };
@@ -236,8 +240,13 @@ export class UltrasonicEmitter {
    * Start emitting `nonce` immediately and repeat every `repeatMs` until
    * stopped. The dashboard calls this each time a new nonce arrives from
    * getSessionToken (tokens rotate ~15 s). Returns a stop function.
+   *
+   * Default repeat 600 ms: one frame is (marker + 8 nibbles) × 60 ms = 540 ms,
+   * so 600 ms re-arms almost back-to-back. This makes the phone catch a full
+   * frame much sooner (a missed frame is retried in ~600 ms instead of ~1 s),
+   * i.e. faster on-device capture without changing the protocol timing.
    */
-  async start(nonce: string, repeatMs = 1000): Promise<StopFn> {
+  async start(nonce: string, repeatMs = 600): Promise<StopFn> {
     const ctx = this.ensureContext();
     if (ctx.state === "suspended") await ctx.resume();
     this.stop();
@@ -247,7 +256,7 @@ export class UltrasonicEmitter {
   }
 
   /** Switch the active nonce without tearing down the context. */
-  update(nonce: string, repeatMs = 1000) {
+  update(nonce: string, repeatMs = 600) {
     if (!this.ctx) return;
     this.stop();
     this.playFrameOnce(nonce);

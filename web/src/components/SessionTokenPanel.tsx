@@ -18,10 +18,16 @@ import {
 
 // Preset ultrasonic bands (reach vs. audibility trade-off). The mobile decoder
 // is band-agnostic — only bandLow/bandHigh differ — so these stay compatible.
+// The FIRST preset is the runtime default (bandIdx=0) and MUST match the
+// mobile decoder band. On-device TR-0 testing showed laptop speakers barely
+// radiate 19–20 kHz (phone never saw the start marker → decode 0%), so the
+// standard band was lowered to 17–18.5 kHz (strong emit + 100% physical
+// loopback; 17 kHz keeps the audible 16 kHz out). Keep this aligned with
+// DEFAULT_PROTOCOL in ultrasonicEmitter.ts and B's decoder.
 const BAND_PRESETS = [
-  { label: "18–20 kHz (표준)", low: 18000, high: 20000 },
+  { label: "17–18.5 kHz (표준·기기검증)", low: 17000, high: 18500 },
   { label: "17–19 kHz (도달 우선)", low: 17000, high: 19000 },
-  { label: "19–20 kHz (조용/근거리)", low: 19000, high: 20000 },
+  { label: "18–20 kHz (조용/근거리·고사양 스피커)", low: 18000, high: 20000 },
 ];
 
 // Screen (a): live QR + REAL ultrasonic audio-nonce emitter with window controls.
