@@ -359,3 +359,144 @@ class MyAttendanceItem {
             : null,
       );
 }
+
+
+/// #/components/schemas/Course — an offered course with its weekly schedule.
+///
+/// Contract shape (owner A, GET /courses/catalog & GET /me/courses):
+///   id, code, name, department, professor_name, day_of_week (1=Mon..7=Sun),
+///   start_period, end_period (inclusive class periods), location, credits.
+/// `enrolled` is a client-side/derived flag the catalog uses to toggle the
+/// 수강신청 / 신청됨 button; the my-courses endpoint returns only enrolled ones.
+class Course {
+  const Course({
+    required this.id,
+    required this.code,
+    required this.name,
+    required this.department,
+    required this.professorName,
+    required this.dayOfWeek,
+    required this.startPeriod,
+    required this.endPeriod,
+    required this.location,
+    required this.credits,
+    this.enrolled = false,
+  });
+
+  final String id;
+  final String code;
+  final String name;
+  final String department;
+  final String professorName;
+
+  /// ISO-ish weekday: 1=Mon, 2=Tue, ... 7=Sun (matches DateTime.weekday).
+  final int dayOfWeek;
+
+  /// Inclusive class-period range (1..N). A single-period class has
+  /// startPeriod == endPeriod.
+  final int startPeriod;
+  final int endPeriod;
+
+  final String location;
+  final int credits;
+
+  /// True when the authenticated student is enrolled in this course.
+  final bool enrolled;
+
+  /// Number of periods this course spans (>= 1).
+  int get periodSpan =>
+      (endPeriod >= startPeriod) ? (endPeriod - startPeriod + 1) : 1;
+
+  Course copyWith({bool? enrolled}) => Course(
+        id: id,
+        code: code,
+        name: name,
+        department: department,
+        professorName: professorName,
+        dayOfWeek: dayOfWeek,
+        startPeriod: startPeriod,
+        endPeriod: endPeriod,
+        location: location,
+        credits: credits,
+        enrolled: enrolled ?? this.enrolled,
+      );
+
+  factory Course.fromJson(Map<String, dynamic> json) => Course(
+        id: json['id'] as String? ?? '',
+        code: json['code'] as String? ?? '',
+        name: json['name'] as String? ?? '',
+        department: json['department'] as String? ?? '',
+        professorName:
+            json['professor_name'] as String? ?? json['professor'] as String? ?? '',
+        dayOfWeek: (json['day_of_week'] as num?)?.toInt() ?? 1,
+        startPeriod: (json['start_period'] as num?)?.toInt() ?? 1,
+        endPeriod: (json['end_period'] as num?)?.toInt() ??
+            (json['start_period'] as num?)?.toInt() ??
+            1,
+        location: json['location'] as String? ?? '',
+        credits: (json['credits'] as num?)?.toInt() ?? 0,
+        enrolled: json['enrolled'] as bool? ?? false,
+      );
+}
+
+/// Korean single-char weekday label for a 1=Mon..7=Sun value ('?' if invalid).
+String weekdayLabelKo(int dayOfWeek) {
+  const labels = ['월', '화', '수', '목', '금', '토', '일'];
+  if (dayOfWeek < 1 || dayOfWeek > 7) return '?';
+  return labels[dayOfWeek - 1];
+}
+
+/// Pure timetable helpers — kept free of Flutter so the placement/overlap logic
+/// is unit-testable without a widget tree.
+class Timetable {
+  const Timetable._();
+
+  /// Two courses overlap when they share the same weekday AND their inclusive
+  /// period ranges intersect. A well-formed range has start <= end; malformed
+  /// ranges are normalised so the test is symmetric.
+  static bool overlaps(Course a, Course b) {
+    if (a.dayOfWeek != b.dayOfWeek) return false;
+    final aStart = a.startPeriod <= a.endPeriod ? a.startPeriod : a.endPeriod;
+    final aEnd = a.startPeriod <= a.endPeriod ? a.endPeriod : a.startPeriod;
+    final bStart = b.startPeriod <= b.endPeriod ? b.startPeriod : b.endPeriod;
+    final bEnd = b.startPeriod <= b.endPeriod ? b.endPeriod : b.startPeriod;
+    return aStart <= bEnd && bStart <= aEnd;
+  }
+
+  /// The set of course ids that clash with at least one other course in
+  /// [courses] (same day + overlapping periods). Used to paint clashing blocks
+  /// with the warning color.
+  static Set<String> conflictingIds(List<Course> courses) {
+    final clashing = <String>{};
+    for (var i = 0; i < courses.length; i++) {
+      for (var j = i + 1; j < courses.length; j++) {
+        if (overlaps(courses[i], courses[j])) {
+          clashing.add(courses[i].id);
+          clashing.add(courses[j].id);
+        }
+      }
+    }
+    return clashing;
+  }
+
+  /// The inclusive maximum period across all courses, clamped to at least
+  /// [minPeriods] so the grid always shows a sensible number of rows.
+  static int maxPeriod(List<Course> courses, {int minPeriods = 9}) {
+    var maxP = minPeriods;
+    for (final c in courses) {
+      final end = c.endPeriod >= c.startPeriod ? c.endPeriod : c.startPeriod;
+      if (end > maxP) maxP = end;
+    }
+    return maxP;
+  }
+
+  /// The inclusive maximum weekday across all courses, clamped between
+  /// [minDays] (Mon–Fri) and 7 (adds Sat/Sun only when a class needs it).
+  static int maxDay(List<Course> courses, {int minDays = 5}) {
+    var maxD = minDays;
+    for (final c in courses) {
+      if (c.dayOfWeek > maxD && c.dayOfWeek <= 7) maxD = c.dayOfWeek;
+    }
+    return maxD;
+  }
+}

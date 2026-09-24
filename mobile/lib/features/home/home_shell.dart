@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/providers.dart';
 import '../attendance/attendance_verify_screen.dart';
 import '../auth/auth_controller.dart';
+import '../courses/course_screens.dart';
 import '../risk/risk_warning.dart';
 import '../views/view_screens.dart';
 
@@ -22,10 +23,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   static const _tabs = <Widget>[
     MyAttendanceScreen(),
     TimetableScreen(),
+    CourseCatalogScreen(),
     InquiryScreen(),
   ];
 
-  static const _titles = ['내 출결', '시간표', '출결 문의'];
+  static const _titles = ['내 출결', '시간표', '강의 조회', '출결 문의'];
 
   Future<void> _confirmLogout() async {
     // Light UX nudge only (no hard cooldown/lock — server owns uniqueness).
@@ -92,6 +94,8 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               icon: Icon(Icons.checklist), label: '내 출결'),
           NavigationDestination(
               icon: Icon(Icons.schedule), label: '시간표'),
+          NavigationDestination(
+              icon: Icon(Icons.menu_book), label: '강의 조회'),
           NavigationDestination(
               icon: Icon(Icons.question_answer), label: '문의'),
         ],

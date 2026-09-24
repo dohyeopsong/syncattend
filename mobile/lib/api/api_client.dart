@@ -32,4 +32,19 @@ abstract class ApiClient {
 
   /// Student risk-warning SSE stream (/sse/students/{id}).
   Stream<RiskWarning> riskWarnings(String studentId);
+
+  // courses (student self-enrollment + timetable)
+  /// All offered courses (GET /courses/catalog). Each item's [Course.enrolled]
+  /// reflects whether the authenticated student is already enrolled.
+  Future<List<Course>> getCourseCatalog();
+
+  /// Self-enroll in a course (POST /courses/{id}/enroll-self).
+  Future<void> enrollSelf(String courseId);
+
+  /// Cancel self-enrollment (DELETE /courses/{id}/enroll-self).
+  Future<void> unenrollSelf(String courseId);
+
+  /// Courses the authenticated student is enrolled in (GET /me/courses),
+  /// used to render the weekly timetable.
+  Future<List<Course>> getMyCourses();
 }

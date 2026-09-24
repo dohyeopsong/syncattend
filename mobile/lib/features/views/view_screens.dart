@@ -99,32 +99,6 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-/// Weekly timetable view (placeholder; contract endpoint pending from A).
-class TimetableScreen extends StatelessWidget {
-  const TimetableScreen({super.key});
-
-  static const _rows = [
-    ('월', '자료구조', '09:00–10:30'),
-    ('화', '운영체제', '11:00–12:30'),
-    ('수', '네트워크', '13:00–14:30'),
-    ('목', '캡스톤', '15:00–17:00'),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      children: [
-        for (final (day, course, time) in _rows)
-          ListTile(
-            leading: CircleAvatar(child: Text(day)),
-            title: Text(course),
-            subtitle: Text(time),
-          ),
-      ],
-    );
-  }
-}
-
 /// Attendance inquiry: compose a question and view answers (placeholder).
 class InquiryScreen extends StatefulWidget {
   const InquiryScreen({super.key});

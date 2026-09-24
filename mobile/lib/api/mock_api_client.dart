@@ -218,6 +218,126 @@ class MockApiClient implements ApiClient {
     );
   }
 
+  // ---- courses (in-memory catalog + enrolled set) ----
+
+  /// Static offered-courses catalog for offline/mock development. day_of_week
+  /// is 1=Mon..7=Sun; periods are inclusive. Includes an intentional Mon
+  /// 3–4교시 clash (자료구조 vs 알고리즘) to exercise the overlap UI.
+  static const List<Course> _catalog = [
+    Course(
+      id: 'c-ds',
+      code: 'CSE201',
+      name: '자료구조',
+      department: '컴퓨터공학과',
+      professorName: '김교수',
+      dayOfWeek: 1,
+      startPeriod: 3,
+      endPeriod: 4,
+      location: '공학관 401',
+      credits: 3,
+    ),
+    Course(
+      id: 'c-algo',
+      code: 'CSE301',
+      name: '알고리즘',
+      department: '컴퓨터공학과',
+      professorName: '이교수',
+      dayOfWeek: 1,
+      startPeriod: 4,
+      endPeriod: 5,
+      location: '공학관 402',
+      credits: 3,
+    ),
+    Course(
+      id: 'c-os',
+      code: 'CSE302',
+      name: '운영체제',
+      department: '컴퓨터공학과',
+      professorName: '박교수',
+      dayOfWeek: 2,
+      startPeriod: 5,
+      endPeriod: 6,
+      location: '공학관 210',
+      credits: 3,
+    ),
+    Course(
+      id: 'c-net',
+      code: 'CSE303',
+      name: '컴퓨터네트워크',
+      department: '컴퓨터공학과',
+      professorName: '최교수',
+      dayOfWeek: 3,
+      startPeriod: 2,
+      endPeriod: 3,
+      location: '공학관 305',
+      credits: 3,
+    ),
+    Course(
+      id: 'c-cap',
+      code: 'CSE401',
+      name: '캡스톤디자인',
+      department: '컴퓨터공학과',
+      professorName: '정교수',
+      dayOfWeek: 4,
+      startPeriod: 6,
+      endPeriod: 8,
+      location: '창의관 501',
+      credits: 3,
+    ),
+    Course(
+      id: 'c-eng',
+      code: 'GEN101',
+      name: '대학영어',
+      department: '교양학부',
+      professorName: 'Smith',
+      dayOfWeek: 5,
+      startPeriod: 1,
+      endPeriod: 2,
+      location: '인문관 112',
+      credits: 2,
+    ),
+  ];
+
+  /// Ids the mock student is currently enrolled in. Seeded with a couple so the
+  /// timetable is non-empty on first run.
+  final Set<String> _enrolled = {'c-ds', 'c-os'};
+
+  @override
+  Future<List<Course>> getCourseCatalog() async {
+    await _latency();
+    return _catalog
+        .map((c) => c.copyWith(enrolled: _enrolled.contains(c.id)))
+        .toList();
+  }
+
+  @override
+  Future<void> enrollSelf(String courseId) async {
+    await _latency();
+    if (!_catalog.any((c) => c.id == courseId)) {
+      throw const ApiError(
+        detail: 'Course not found',
+        code: 'not_found',
+        statusCode: 404,
+      );
+    }
+    _enrolled.add(courseId);
+  }
+
+  @override
+  Future<void> unenrollSelf(String courseId) async {
+    await _latency();
+    _enrolled.remove(courseId);
+  }
+
+  @override
+  Future<List<Course>> getMyCourses() async {
+    await _latency();
+    return _catalog
+        .where((c) => _enrolled.contains(c.id))
+        .map((c) => c.copyWith(enrolled: true))
+        .toList();
+  }
+
   Future<void> _latency() =>
       Future<void>.delayed(const Duration(milliseconds: 300));
 }

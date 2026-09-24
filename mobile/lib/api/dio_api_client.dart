@@ -227,4 +227,48 @@ class DioApiClient implements ApiClient {
       }
     }
   }
+
+  @override
+  Future<List<Course>> getCourseCatalog() async {
+    try {
+      final res = await _dio.get('/courses/catalog');
+      return (res.data as List<dynamic>)
+          .map((e) => Course.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<void> enrollSelf(String courseId) async {
+    try {
+      await _dio.post('/courses/$courseId/enroll-self');
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<void> unenrollSelf(String courseId) async {
+    try {
+      await _dio.delete('/courses/$courseId/enroll-self');
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<List<Course>> getMyCourses() async {
+    try {
+      final res = await _dio.get('/me/courses');
+      return (res.data as List<dynamic>)
+          .map((e) => Course.fromJson(e as Map<String, dynamic>).copyWith(
+                enrolled: true,
+              ))
+          .toList();
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
 }
