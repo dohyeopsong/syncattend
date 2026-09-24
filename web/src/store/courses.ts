@@ -16,11 +16,30 @@ import type {
   UpdateCourseRequest,
 } from "@/api/types";
 
-// Client-side filter fallback for when the backend does not (yet) honor ?q=.
-function matchesQuery(c: CourseCatalogItem, q: string): boolean {
+// Which field the professor is searching by. "all" keeps the original
+// behavior (name / professor / code together); the others narrow to one field
+// so the autocomplete only matches the chosen column.
+export type SearchField = "all" | "name" | "professor_name" | "code";
+
+// Client-side filter. The backend `q` returns a broad OR match across
+// name/professor/code; we further narrow to the selected field here so no
+// contract/backend change is needed.
+function matchesQuery(
+  c: CourseCatalogItem,
+  q: string,
+  field: SearchField,
+): boolean {
   const needle = q.trim().toLowerCase();
   if (!needle) return true;
-  return [c.name, c.code, c.professor_name, c.department]
+  const fields: (string | null | undefined)[] =
+    field === "all"
+      ? [c.name, c.code, c.professor_name, c.department]
+      : field === "name"
+        ? [c.name]
+        : field === "professor_name"
+          ? [c.professor_name]
+          : [c.code];
+  return fields
     .filter((v): v is string => !!v)
     .some((v) => v.toLowerCase().includes(needle));
 }
@@ -33,7 +52,7 @@ interface CoursesState {
   catalog: CourseCatalogItem[]; // latest search results
   catalogLoading: boolean;
   fetchCourses: () => Promise<void>;
-  searchCatalog: (q: string) => Promise<void>;
+  searchCatalog: (q: string, field?: SearchField) => Promise<void>;
   clearCatalog: () => void;
   addCourse: (payload: CreateCourseRequest) => Promise<Course | null>;
   updateCourse: (
@@ -67,10 +86,10 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
     }
   },
 
-  // Debounced by the caller. Sends ?q= to the backend; if the backend returns
-  // the full catalog (q not yet honored), we filter client-side so the UX
-  // works either way. A blank query clears results.
-  searchCatalog: async (q) => {
+  // Debounced by the caller. Fetches a broad match from the backend (?q=),
+  // then narrows client-side to the selected `field` (name / professor / code
+  // / all). A blank query clears results. No backend/contract change needed.
+  searchCatalog: async (q, field = "all") => {
     if (!q.trim()) {
       set({ catalog: [], catalogLoading: false });
       return;
@@ -78,7 +97,7 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
     set({ catalogLoading: true });
     try {
       const items = await apiListCatalog(q);
-      const filtered = items.filter((c) => matchesQuery(c, q));
+      const filtered = items.filter((c) => matchesQuery(c, q, field));
       set({ catalog: filtered, catalogLoading: false });
     } catch (e) {
       set({ catalogLoading: false, error: toMessage(e) });

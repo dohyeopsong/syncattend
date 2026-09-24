@@ -5,7 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import { useCoursesStore } from "@/store/courses";
+import { useCoursesStore, type SearchField } from "@/store/courses";
 import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
 import { Button } from "@/components/ui/button";
@@ -325,13 +325,14 @@ function CatalogSearch({
   const clearCatalog = useCoursesStore((s) => s.clearCatalog);
 
   const [query, setQuery] = useState("");
+  const [field, setField] = useState<SearchField>("all");
   const [open, setOpen] = useState(false);
   const debounced = useDebounced(query, 300);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    void searchCatalog(debounced);
-  }, [debounced, searchCatalog]);
+    void searchCatalog(debounced, field);
+  }, [debounced, field, searchCatalog]);
 
   // Close on outside click.
   useEffect(() => {
@@ -347,27 +348,51 @@ function CatalogSearch({
   const showDropdown = open && query.trim().length > 0;
   const noResults = !catalogLoading && debounced.trim().length > 0 && catalog.length === 0;
 
+  // Placeholder reflects the chosen search field.
+  const placeholder =
+    field === "name"
+      ? "강좌명 입력…"
+      : field === "professor_name"
+        ? "교수명 입력…"
+        : field === "code"
+          ? "학수번호 입력…"
+          : "강좌명·교수명·학수번호 입력…";
+
   return (
     <div className="relative space-y-1" ref={boxRef}>
       <label className="text-xs font-medium text-muted-foreground">
         강좌·교수 검색 (자동완성)
       </label>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          className="pl-8"
-          placeholder="과목명 또는 교수명 입력…"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          role="combobox"
-          aria-expanded={showDropdown}
-          aria-controls="catalog-listbox"
-          autoComplete="off"
-        />
+      <div className="flex gap-2">
+        {/* Search-by selector: narrow the autocomplete to one field. */}
+        <select
+          className="h-10 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+          value={field}
+          onChange={(e) => setField(e.target.value as SearchField)}
+          aria-label="검색 기준"
+        >
+          <option value="all">전체</option>
+          <option value="name">강좌명</option>
+          <option value="professor_name">교수명</option>
+          <option value="code">학수번호</option>
+        </select>
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-8"
+            placeholder={placeholder}
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            role="combobox"
+            aria-expanded={showDropdown}
+            aria-controls="catalog-listbox"
+            autoComplete="off"
+          />
+        </div>
       </div>
 
       {showDropdown && (
