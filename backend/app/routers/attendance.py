@@ -13,6 +13,7 @@ verifyAttendance runs the 5-step server verification in order:
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -40,6 +41,8 @@ from app.services.aggregate import absence_count, build_aggregate, risk_warning_
 from app.services.tokens import consume_nonce, cross_verify
 
 router = APIRouter(tags=["attendance"])
+
+logger = logging.getLogger("syncattend.attendance")
 
 
 def _now() -> datetime:
@@ -69,6 +72,16 @@ async def verify_attendance(
     db: AsyncSession = Depends(get_db),
 ) -> VerifyResult:
     redis = get_redis()
+
+    # Diagnostic breadcrumb: a common client bug is calling verify with a blank
+    # or wrong session_id (e.g. QR payload missing session_id). Logging it lets
+    # us trace that from server logs. session_id is not sensitive.
+    logger.info(
+        "verifyAttendance user=%s session_id=%r%s",
+        user.id,
+        body.session_id,
+        " (EMPTY)" if not body.session_id else "",
+    )
 
     session = (
         await db.execute(select(Session).where(Session.id == body.session_id))
