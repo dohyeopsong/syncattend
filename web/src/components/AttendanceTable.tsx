@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { AttendanceStatus } from "@/api/types";
+import { statusMeta } from "@/lib/status";
 import { CheckCircle2, XCircle, Clock, RefreshCw, ClipboardCheck } from "lucide-react";
 
 // Screen (b): Opt-out absentee-centric table. Under Opt-out, verified students
@@ -56,10 +57,14 @@ export function AttendanceTable() {
     pendingDeltas[studentId] ?? "pending";
 
   function StatusBadge({ studentId }: { studentId: string }) {
-    const st = statusFor(studentId);
-    if (st === "present") return <Badge variant="success">출석 처리</Badge>;
-    if (st === "absent") return <Badge variant="destructive">결석 확정</Badge>;
-    return <Badge variant="warning">미인증(검토 대기)</Badge>;
+    const meta = statusMeta(statusFor(studentId));
+    const { Icon } = meta;
+    return (
+      <Badge variant={meta.badgeVariant} className="gap-1">
+        <Icon className="h-3 w-3" />
+        {statusFor(studentId) === "pending" ? "미인증(검토 대기)" : meta.label}
+      </Badge>
+    );
   }
 
   async function onBatchClose() {
@@ -96,13 +101,13 @@ export function AttendanceTable() {
             <div className="text-xs text-muted-foreground">전체 인원</div>
           </div>
           <div className="rounded-lg border p-3 text-center">
-            <div className="text-2xl font-bold text-emerald-600">
+            <div className="text-2xl font-bold text-success">
               {aggregate.present}
             </div>
             <div className="text-xs text-muted-foreground">출석 ({rate}%)</div>
           </div>
           <div className="rounded-lg border p-3 text-center">
-            <div className="text-2xl font-bold text-amber-600">
+            <div className="text-2xl font-bold text-warning">
               {unverified.length}
             </div>
             <div className="text-xs text-muted-foreground">미인증</div>
@@ -111,7 +116,7 @@ export function AttendanceTable() {
 
         {/* Absentee-centric list */}
         {unverified.length === 0 ? (
-          <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+          <div className="flex items-center gap-2 rounded-lg border border-success/30 bg-success/10 p-4 text-sm text-success">
             <CheckCircle2 className="h-4 w-4" /> 미인증 학생이 없습니다. 전원
             자동 출석 처리되었습니다.
           </div>

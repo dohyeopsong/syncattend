@@ -80,12 +80,21 @@ export function RealtimeRiskPanel() {
             (risk.level === "danger"
               ? "border-destructive/40 bg-destructive/10 text-destructive"
               : risk.level === "warning"
-                ? "border-amber-300 bg-amber-50 text-amber-700"
-                : "border-emerald-200 bg-emerald-50 text-emerald-700")
+                ? "border-warning/40 bg-warning/10 text-warning"
+                : "border-success/30 bg-success/10 text-success")
           }
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>{risk.message}</span>
+          <span>
+            <span className="font-semibold">
+              {risk.level === "danger"
+                ? "위험 · "
+                : risk.level === "warning"
+                  ? "주의 · "
+                  : "정상 · "}
+            </span>
+            {risk.message}
+          </span>
         </div>
 
         <div className="grid grid-cols-3 gap-3 text-center">
@@ -94,11 +103,11 @@ export function RealtimeRiskPanel() {
             <div className="text-xs text-muted-foreground">전체</div>
           </div>
           <div className="rounded-lg border p-3">
-            <div className="text-xl font-bold text-emerald-600">{present}</div>
+            <div className="text-xl font-bold text-success">{present}</div>
             <div className="text-xs text-muted-foreground">실시간 출석</div>
           </div>
           <div className="rounded-lg border p-3">
-            <div className="text-xl font-bold text-amber-600">{unverified}</div>
+            <div className="text-xl font-bold text-warning">{unverified}</div>
             <div className="text-xs text-muted-foreground">미인증</div>
           </div>
         </div>
