@@ -16,7 +16,30 @@ class SyncattendApp extends StatelessWidget {
     return MaterialApp(
       title: 'Syncattend',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo),
+      // Clean-minimal design guide §4 (docs/06a_DESIGN_GUIDE_minimal.md):
+      // single indigo accent (#4F46E5) shared with the web, white base,
+      // elevation-0 cards with a hairline border + 12px radius, flat white AppBar.
+      theme: ThemeData(
+        useMaterial3: true,
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF4F46E5), // same indigo as web
+          brightness: Brightness.light,
+        ),
+        scaffoldBackgroundColor: const Color(0xFFFFFFFF),
+        cardTheme: CardThemeData(
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: Color(0xFFE5E7EB)), // hairline border
+          ),
+        ),
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.white,
+          foregroundColor: Color(0xFF111827),
+          elevation: 0,
+          scrolledUnderElevation: 0.5,
+        ),
+      ),
       home: const _RootRouter(),
     );
   }

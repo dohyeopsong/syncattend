@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/design.dart';
 import '../../core/providers.dart';
 import '../../models/contract_models.dart';
 
@@ -13,19 +14,6 @@ final myAttendanceProvider = FutureProvider<List<MyAttendanceItem>>(
 class MyAttendanceScreen extends ConsumerWidget {
   const MyAttendanceScreen({super.key});
 
-  Color _statusColor(AttendanceStatus s) {
-    switch (s) {
-      case AttendanceStatus.present:
-        return Colors.green;
-      case AttendanceStatus.absent:
-        return Colors.red;
-      case AttendanceStatus.pending:
-        return Colors.orange;
-      case AttendanceStatus.unknown:
-        return Colors.grey;
-    }
-  }
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(myAttendanceProvider);
@@ -37,7 +25,7 @@ class MyAttendanceScreen extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, color: Colors.red, size: 40),
+              const Icon(Icons.error_outline, color: AppColors.warning, size: 40),
               const SizedBox(height: 12),
               Text('출결 이력을 불러오지 못했습니다.\n$e',
                   textAlign: TextAlign.center),
@@ -61,21 +49,52 @@ class MyAttendanceScreen extends ConsumerWidget {
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
               final r = items[i];
+              final color = attendanceStatusColor(r.status);
               return ListTile(
-                leading: Icon(Icons.circle,
-                    color: _statusColor(r.status), size: 14),
+                leading: Icon(attendanceStatusIcon(r.status),
+                    color: color, size: 22),
                 title: Text(r.courseName.isEmpty
                     ? '세션 ${r.sessionId}'
                     : r.courseName),
                 subtitle: Text(r.verifiedAt != null
                     ? '인증: ${r.verifiedAt}'
                     : '미인증'),
-                trailing: Text(r.status.name),
+                // Status = colored badge + Korean label (never color alone).
+                trailing: _StatusBadge(status: r.status),
               );
             },
           ),
         );
       },
+    );
+  }
+}
+
+/// Small status badge: colored pill + Korean label + icon (guide §2).
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+  final AttendanceStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = attendanceStatusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(attendanceStatusIcon(status), size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(attendanceStatusLabel(status),
+              style: TextStyle(
+                  color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+        ],
+      ),
     );
   }
 }
