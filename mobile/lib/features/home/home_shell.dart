@@ -19,6 +19,16 @@ class _HomeShellState extends ConsumerState<HomeShell> {
   int _index = 0;
 
   // Placeholder student id until a "me" endpoint is added to the contract.
+  //
+  // TODO(A-dep, /me): openapi.yaml has no student id in TokenPair and no
+  //   GET /me (only /devices/me for the device binding). When A adds either
+  //   (a) `id`/`student_id` to TokenPair, or (b) a GET /me returning the
+  //   authenticated student's id, do:
+  //     1. store the id on login (AuthController.login → SecureStore / state),
+  //     2. expose it via a provider (e.g. studentIdProvider),
+  //     3. replace `_studentId` here so RiskWarningBanner subscribes to
+  //        /sse/students/{realId} instead of the "me" placeholder.
+  //   Do NOT edit contracts/openapi.yaml here — request the change from A.
   static const _studentId = 'me';
 
   static const _tabs = <Widget>[

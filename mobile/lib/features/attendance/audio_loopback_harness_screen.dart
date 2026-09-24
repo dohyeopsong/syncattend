@@ -23,6 +23,14 @@ import 'permissions_service.dart';
 ///
 /// This introduces NO new dependency (reuses `record` via AudioCaptureService)
 /// and stays entirely within mobile/.
+///
+/// TODO(C-dep, Stage-1 emitter): as of 2026-09-25 the web SessionTokenPanel only
+///   DISPLAYS `audio_nonce` as text — it does not yet emit ultrasonic audio.
+///   Stage-1 real-rate measurement is blocked until C ships an emitter that
+///   plays the agreed frames (start marker + 8 hex nibbles + inter-symbol guard
+///   tone). When it lands: deploy this app to a real device, enter the emitted
+///   nonce, run, and fill the "Real-device checklist" rates in mobile/README.md.
+///   Do NOT emit from here or edit web/ — that is owner C's surface.
 class AudioLoopbackHarnessScreen extends ConsumerStatefulWidget {
   const AudioLoopbackHarnessScreen({super.key});
 

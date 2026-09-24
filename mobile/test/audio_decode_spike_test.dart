@@ -65,6 +65,40 @@ class _Emitter {
     if (i >= n - ramp) return (n - 1 - i) / ramp;
     return 1.0;
   }
+
+  /// Builds a frame mirroring owner C's emitter (web/src/lib/ultrasonicEmitter):
+  ///   [marker] guard [n0] guard [n1] guard ... [n_last] guard
+  /// with a SILENT inter-symbol guard of [guardFraction] * symbol. The silent
+  /// guard makes the decoder flush its run on the silent gap, so even two
+  /// identical adjacent nibbles are separated into distinct runs. This lets us
+  /// verify software interop with C's guarded protocol WITHOUT the ambiguity
+  /// restriction of the guard-less path.
+  Float64List buildGuardedFrame(
+    List<int> nibbles, {
+    double amplitude = 0.6,
+    double guardFraction = 0.2,
+  }) {
+    final markerSlot = toneSlots - 1;
+    final slots = <int>[markerSlot, ...nibbles];
+    final guard = (_samplesPerSymbol * guardFraction).floor();
+    final perSymbol = _samplesPerSymbol + guard;
+    final out = Float64List(slots.length * perSymbol);
+    var idx = 0;
+    for (final slot in slots) {
+      final freq = decoder.slotFrequency(slot);
+      final base = idx;
+      for (var i = 0; i < _samplesPerSymbol; i++) {
+        final env = _envelope(i, _samplesPerSymbol);
+        out[idx++] =
+            amplitude * env * math.sin(2 * math.pi * freq * (i + base) / sampleRate);
+      }
+      // silent guard
+      for (var g = 0; g < guard; g++) {
+        out[idx++] = 0;
+      }
+    }
+    return out;
+  }
 }
 
 /// Adds white Gaussian noise to reach approximately [targetSnrDb] relative to
@@ -355,6 +389,68 @@ void main() {
           '${(rate * 100).toStringAsFixed(1)}% ($ok/$trials)');
       expect(rate, greaterThan(0.8),
           reason: 'oversampled robust decode should tolerate symbol-boundary jitter');
+    });
+  });
+
+  group('Audio decode — guarded frame interop (owner C emitter)', () {
+    // Owner C's emitter (web/src/lib/ultrasonicEmitter.ts) inserts a SILENT
+    // inter-symbol guard (option a) so adjacent identical nibbles are separable.
+    // This verifies — in software — that this decoder recovers ARBITRARY nonces
+    // (including adjacent-identical nibbles) from a C-shaped guarded frame under
+    // jitter + noise, i.e. protocol interop before any hardware run.
+    test('recovers arbitrary nonce (incl. adjacent-identical) from guarded frame',
+        () async {
+      final decoder = makeDecoder();
+      final emitter = _Emitter(
+        sampleRate: sampleRate,
+        toneSlots: toneSlots,
+        symbolMs: symbolMs,
+        decoder: decoder,
+      );
+      final rng = math.Random(99);
+      const windowSamples = (sampleRate * symbolMs) ~/ 1000;
+      const hopsPerSymbol = 8;
+      const hop = windowSamples ~/ hopsPerSymbol;
+      var ok = 0;
+      const trials = 40;
+      var sawAdjacentDup = false;
+      for (var t = 0; t < trials; t++) {
+        // Arbitrary nonce: nibbles 0..14 (0xF collides with marker, excluded —
+        // matches C's emitter remapping 0xF→0xE).
+        final nibbles = List<int>.generate(8, (_) => rng.nextInt(15));
+        for (var i = 1; i < nibbles.length; i++) {
+          if (nibbles[i] == nibbles[i - 1]) sawAdjacentDup = true;
+        }
+        final hex = _hex(nibbles);
+        final offset = rng.nextInt(windowSamples);
+        final clean = emitter.buildGuardedFrame(nibbles);
+        const tail = windowSamples;
+        final padded = Float64List(offset + clean.length + tail)
+          ..setRange(offset, offset + clean.length, clean);
+        final noisy = _addNoise(padded, 20, rng);
+        final windows = <Float64List>[];
+        for (var s = 0; s + windowSamples <= noisy.length; s += hop) {
+          windows.add(Float64List.sublistView(noisy, s, s + windowSamples));
+        }
+        final decoded = await decoder
+            .decodeStreamOversampled(
+              Stream.fromIterable(windows),
+              hopsPerSymbol: hopsPerSymbol,
+            )
+            .firstWhere((_) => true, orElse: () => '')
+            .timeout(const Duration(seconds: 2), onTimeout: () => '');
+        if (decoded == hex) ok++;
+      }
+      final rate = ok / trials;
+      // ignore: avoid_print
+      print('[AUDIO SPIKE] guarded frame, arbitrary nonce (20dB): '
+          '${(rate * 100).toStringAsFixed(1)}% ($ok/$trials), '
+          'adjacent-dup present=$sawAdjacentDup');
+      // With guards, adjacent-identical nibbles must no longer break decode.
+      expect(sawAdjacentDup, isTrue,
+          reason: 'sanity: the trial set should include adjacent-identical nibbles');
+      expect(rate, greaterThan(0.8),
+          reason: 'guarded frames must decode arbitrary nonces reliably');
     });
   });
 }

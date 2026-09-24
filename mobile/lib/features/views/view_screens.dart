@@ -8,6 +8,15 @@ import '../../models/contract_models.dart';
 /// student-facing GET for "my attendance history" (only professor session
 /// aggregates + PATCH). Until a contract endpoint exists, this renders local /
 /// placeholder data so the screen and navigation are complete.
+///
+/// TODO(A-dep, attendance history): when A adds a student GET (e.g.
+///   GET /students/me/attendance or GET /attendance/mine returning
+///   [AttendanceRecord]), do:
+///     1. add `Future<List<AttendanceRecord>> myAttendance()` to ApiClient
+///        (+ DioApiClient real call, + MockApiClient sample),
+///     2. convert this widget to Consumer + a FutureProvider,
+///     3. delete `_placeholder` below.
+///   Do NOT edit contracts/openapi.yaml here — request the endpoint from A.
 class MyAttendanceScreen extends StatelessWidget {
   const MyAttendanceScreen({super.key});
 

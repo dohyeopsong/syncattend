@@ -116,6 +116,25 @@ CI. It reuses the same `AudioCaptureService`/decoder as attendance (no new
 dependency). Steps: enter the expected nonce → start → have owner C's emitter
 play the 18–20 kHz frames → read the live success rate → record it below.
 
+**Stage-1 run procedure (finalized — run the moment C's emitter + a device are
+ready):**
+1. Prereq (owner C): a real ultrasonic *emitter* that PLAYS the agreed frames
+   (start marker + 8 hex nibbles, **inter-symbol guard tone** so adjacent equal
+   nibbles are separable) from the laptop speaker. As of 2026-09-25 owner C has
+   an emitter (`web/src/lib/ultrasonicEmitter.ts`, Web Audio) that adopts the
+   **silent inter-symbol guard** (option a) exactly matching this decoder's
+   run-flush-on-silence behaviour, and the shared protocol (band 18–20 kHz, 16
+   slots, 60 ms symbols, slot 15 = marker, nonce = hex nibbles). Software-level
+   interop with a guarded frame is covered by the "guarded frame" spike test;
+   **the real acoustic-path rate is still pending a device run** (this CLI env
+   has no iOS/Android device).
+2. Deploy this app to an iOS/Android device (mic entitlement present in the
+   platform folders; this CLI env has only macOS/Chrome so it can't be the
+   receiver).
+3. Open `AudioLoopbackHarnessScreen`, type the nonce C is emitting into
+   "기대 nonce", tap 측정 시작.
+4. Record the live 성공률 at each condition into the table below.
+
 - [ ] Loopback: C's emitter (speaker) → this app (mic) at 1 m, quiet room. Rate: ____%
 - [ ] Classroom distance sweep (front row / mid / back) + ambient chatter. Rate: ____%
 - [ ] Record measured success rate here per distance/noise condition.
