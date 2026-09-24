@@ -1,91 +1,119 @@
-# Git worktree 전환 안내 (2026-09-24)
+# 작업 방식 안내 — 3개 터미널 병렬 작업 (2026-09-24 갱신)
 
-> **다른 터미널(CLI)에 붙여넣어 현재 상태를 검증·전환시키기 위한 프롬프트입니다.**
-> 지금까지 단일 클론 하나를 3개 CLI가 공유하며 브랜치를 갈아끼워 작업해서 커밋이 계속 꼬였습니다.
-> 이를 해결하기 위해 **저장소를 초기화하고 git worktree로 브랜치별 독립 폴더를 새로 구성**했습니다.
+> **모든 터미널(CLI)에 붙여넣어 현재 작업 방식을 맞추기 위한 안내입니다.**
+> 지금은 **한 명이 터미널 3개를 동시에 띄워** backend / mobile / web 세 파트를
+> 병렬로 개발하는 **프로토타입 단계**입니다. (팀 프로젝트지만 아직 합류 전)
+>
+> 예전에는 단일 클론 하나를 여러 CLI가 공유하며 `git checkout`으로 브랜치를 갈아끼워
+> 커밋이 계속 꼬였습니다. **이제는 브랜치를 갈아끼우지 않고, 모두 같은 `main`에서
+> 각자 자기 폴더만 편집하는 방식(방법 1)으로 통일합니다.**
 
-## 새 구조
+## 현재 구조
 
-| 폴더 | 브랜치 | Track | 원격 트래킹 |
-|------|--------|-------|-------------|
-| `~/Dev/syncattend-...`(원본 폴더) | `feature/backend` | **A 백엔드** | ✅ origin/feature/backend |
-| `~/Dev/syncattend-mobile` | `feature/student-app` | **B 모바일** | ✅ origin/feature/student-app |
-| `~/Dev/syncattend-web` | `feature/dashboard-infra` | **C 웹/인프라** | ✅ origin/feature/dashboard-infra |
+| 항목 | 값 |
+|------|-----|
+| 작업 폴더 | `~/Dev/syncattend` (모든 터미널이 **동일 폴더** 공유) |
+| 브랜치 | `main` (단일 — 갈아끼우지 않음) |
+| 원격 `origin` | https://github.com/dohyeopsong/syncattend.git (**public**) |
+| 원격 `old-origin` | https://github.com/dohyeopsong/syncattend-old.git (이전 저장소, 백업용) |
 
-## 이번에 정리된 것
-- 이전 백엔드 작업은 PR #2로 **`main`에 병합 완료** (auth 엔진 + attendance/courses API, 테스트 36개 통과).
-- 여기저기 흩어졌던 stash 4개(대부분 백엔드 A 소유)를 정리해 올바른 위치로 이동.
-- 꼬였던 로컬 브랜치/중복 worktree를 삭제하고 `main` 기준으로 worktree 3개를 새로 생성.
-- B/C의 미푸시 커밋은 없음(모두 origin에 백업됨) → 유실 없이 초기화.
+| 터미널 | 담당 파트 | 편집 가능 폴더 |
+|--------|-----------|----------------|
+| 터미널 1 | **A 백엔드** | `backend/`, `contracts/` |
+| 터미널 2 | **B 모바일** | `mobile/` |
+| 터미널 3 | **C 웹/인프라** | `web/`, `infra/`, `.github/` |
 
-## 새 규칙 (중요)
-1. **각 CLI는 오직 자기 폴더에서만** `git add` / `commit` / `push` 한다.
-2. **`git checkout`으로 브랜치를 갈아끼우지 않는다.** 폴더가 곧 브랜치다.
-3. 자기 폴더 밖(다른 track의) 파일이 변경 목록에 보이면 커밋하지 말고 먼저 알린다.
-4. `contracts/openapi.yaml`·`backend/migrations/`는 **A만** 편집. `infra/`·`.github/`는 **C만** 편집.
+## 절대 규칙 (모든 터미널 공통)
+1. **`git checkout`으로 브랜치를 바꾸지 않는다.** 셋 다 항상 `main`에 머문다.
+2. **커밋할 때 `git add .` 금지.** 반드시 자기 담당 경로만 지정해서 스테이징한다.
+   ```
+   git add backend/ contracts/   # 터미널 1 (A)
+   git add mobile/               # 터미널 2 (B)
+   git add web/ infra/ .github/  # 터미널 3 (C)
+   ```
+3. 자기 담당 폴더 밖의 파일이 변경 목록에 보이면 **커밋하지 말고 먼저 확인**한다.
+4. `contracts/openapi.yaml`·`backend/migrations/`는 **A만**, `infra/`·`.github/`는 **C만** 편집.
+5. **push 하기 전 항상** `git fetch` 후 상태를 확인한다 (아래 push 절차 참고).
+
+## push 절차 (경합 방지 — 중요)
+세 터미널이 같은 `main`을 공유하므로, 거의 동시에 push하면 두 번째부터
+"먼저 pull 하라"며 거절될 수 있다. 그럴 땐 아래 순서로 처리한다.
+```
+git add <자기 담당 경로>
+git commit -m "feat(<파트>): 설명"
+git pull --rebase origin main    # 원격의 최신 변경을 내 커밋 아래로 재정렬
+git push origin main
+```
+> `--rebase`를 쓰면 불필요한 merge 커밋 없이 히스토리가 깔끔하게 이어진다.
+> 서로 다른 폴더만 만졌다면 rebase 중 충돌이 날 일은 거의 없다.
 
 ---
 
-## 공통 (내가 어느 터미널인지 모를 때 먼저 실행)
+## 공통 (내가 어느 터미널인지 확인) — 먼저 실행
 ```
-git rev-parse --show-toplevel   # 현재 작업 폴더
-git branch --show-current       # 현재 브랜치
-git worktree list               # 전체 worktree
+git rev-parse --show-toplevel   # ~/Dev/syncattend 여야 함
+git branch --show-current       # main
+git remote -v                   # origin -> .../syncattend.git 확인
+git fetch && git status         # origin/main 과 동기화 상태 확인
 ```
-그런 다음 아래 "네 트랙" 지시를 따르라. 다른 폴더/브랜치는 절대 건드리지 마라.
+그런 다음 아래 "네 트랙" 지시를 따르라. 자기 담당 폴더 밖 파일은 스테이징하지 마라.
 
----
-
-## CLI A — 백엔드 (`~/Dev/syncattend-...` 원본 폴더, `feature/backend`)
+## 터미널 1 — CLI A 백엔드 (`backend/`, `contracts/`)
 ```
-너는 CLI A(백엔드)다. 네 폴더는 원본 클론 폴더, 브랜치는 feature/backend 다.
-이전 백엔드 작업은 이미 main에 병합됐고(PR #2), feature/backend 는 그 main에서 새로 딴 브랜치다.
-
+너는 CLI A(백엔드)다. 폴더 ~/Dev/syncattend, 브랜치 main 고정. 브랜치 바꾸지 마라.
 검증:
-  git branch --show-current       # feature/backend
-  git status                      # 깨끗해야 함 (web/tsconfig.tsbuildinfo 같은 산출물은 무시)
-  git log --oneline -3            # b8a93d2 (PR #2 머지) 가 베이스
-  git fetch && git status         # origin/feature/backend 와 동기화
-
-테스트/서버 (이 폴더의 backend/.venv 재사용):
-  cd backend && source .venv/bin/activate
-  pytest -q                       # 36 passed 확인
+  git branch --show-current       # main
+  git status                      # backend/contracts 외 변경이 섞이면 커밋 말고 보고
+빌드/테스트:
+  cd backend && python3 -m venv .venv && source .venv/bin/activate
+  pip install -r requirements.txt && pytest -q
   uvicorn app.main:app --reload --port 8000
-
-이후 백엔드/contracts 작업은 전부 이 폴더에서만 하고, 준비되면 git push (업스트림 이미 설정됨).
+커밋/푸시:
+  git add backend/ contracts/
+  git commit -m "feat(backend): ..."
+  git pull --rebase origin main && git push origin main
 ```
 
-## CLI B — 모바일 (`~/Dev/syncattend-mobile`, `feature/student-app`)
+## 터미널 2 — CLI B 모바일 (`mobile/`)
 ```
-너는 CLI B(모바일)다. 네 폴더는 ~/Dev/syncattend-mobile, 브랜치는 feature/student-app 다.
-예전에 이 브랜치 워킹트리에 백엔드 A 변경이 잘못 얹혔던 건 모두 정리됐다. 지금은 모바일 것만 있어야 한다.
-
+너는 CLI B(모바일)다. 폴더 ~/Dev/syncattend, 브랜치 main 고정. 브랜치 바꾸지 마라.
 검증:
-  cd ~/Dev/syncattend-mobile
-  git branch --show-current       # feature/student-app
-  git status                      # backend/web 파일이 섞이면 커밋하지 말고 보고
-  git log --oneline -3
-  git fetch && git status         # origin 과 동기화
-
+  git branch --show-current       # main
+  git status                      # mobile 외 변경(backend/web)이 섞이면 커밋 말고 보고
 빌드/테스트:
   cd mobile && flutter pub get && flutter test
-
-mobile/ 외 폴더가 변경 목록에 보이면 커밋 전에 먼저 알려라.
+커밋/푸시:
+  git add mobile/
+  git commit -m "feat(mobile): ..."
+  git pull --rebase origin main && git push origin main
 ```
 
-## CLI C — 웹/인프라 (`~/Dev/syncattend-web`, `feature/dashboard-infra`)
+## 터미널 3 — CLI C 웹/인프라 (`web/`, `infra/`, `.github/`)
 ```
-너는 CLI C(웹 대시보드+인프라)다. 네 폴더는 ~/Dev/syncattend-web, 브랜치는 feature/dashboard-infra 다.
-
+너는 CLI C(웹 대시보드+인프라)다. 폴더 ~/Dev/syncattend, 브랜치 main 고정. 브랜치 바꾸지 마라.
 검증:
-  cd ~/Dev/syncattend-web
-  git branch --show-current       # feature/dashboard-infra
-  git status                      # web/infra/.github 외 파일이 섞이면 보고
-  git log --oneline -5
-  git fetch && git status         # origin 과 동기화
-
+  git branch --show-current       # main
+  git status                      # web/infra/.github 외 변경이 섞이면 커밋 말고 보고
 빌드:
   cd web && npm install && npm run build
-
-web/ infra/ .github/ 외 폴더가 변경 목록에 보이면 커밋 전에 먼저 알려라.
+커밋/푸시:
+  git add web/ infra/ .github/
+  git commit -m "feat(web): ..."
+  git pull --rebase origin main && git push origin main
 ```
+
+---
+
+## 참고 — 나중에 파트를 격리하고 싶으면 (방법 2: worktree)
+지금은 위의 단일 `main` 방식으로 충분하다. 그러나 각 파트를 독립 브랜치로
+격리하고 PR 리뷰로 합치고 싶어지면 아래처럼 worktree로 전환할 수 있다.
+```
+git branch feature/backend
+git branch feature/mobile
+git branch feature/web
+git worktree add ~/Dev/syncattend-mobile feature/mobile
+git worktree add ~/Dev/syncattend-web    feature/web
+# 원본 ~/Dev/syncattend 는 feature/backend 로 checkout
+```
+→ 터미널마다 완전히 독립된 폴더가 생겨 checkout/push 경합이 사라진다.
+   대신 각 브랜치를 main으로 병합(PR)하는 단계가 추가된다. 전환 시 이 문서를 다시 갱신할 것.
