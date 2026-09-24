@@ -16,24 +16,16 @@ import {
   DEFAULT_PROTOCOL,
 } from "@/lib/ultrasonicEmitter";
 
-// Preset ultrasonic bands (reach vs. audibility trade-off). The mobile decoder
-// is band-agnostic — only bandLow/bandHigh differ — so these stay compatible.
-// The FIRST preset is the runtime default (bandIdx=0) and MUST match the
-// mobile decoder band. On-device TR-0 testing showed laptop speakers barely
-// radiate 19–20 kHz (phone never saw the start marker → decode 0%), so the
-// standard band was lowered to 17–18.5 kHz (strong emit + 100% physical
-// loopback; 17 kHz keeps the audible 16 kHz out). Keep this aligned with
-// DEFAULT_PROTOCOL in ultrasonicEmitter.ts and B's decoder.
-const BAND_PRESETS = [
-  { label: "17–18.5 kHz (표준·기기검증)", low: 17000, high: 18500 },
-  { label: "17–19 kHz (도달 우선)", low: 17000, high: 19000 },
-  { label: "18–20 kHz (조용/근거리·고사양 스피커)", low: 18000, high: 20000 },
-];
-
 // Screen (a): live QR + REAL ultrasonic audio-nonce emitter with window controls.
-// The audio nonce is now physically transmitted via the Web Audio API using the
-// protocol agreed with the mobile decoder (18–20 kHz, 16 slots, 60 ms symbols,
-// slot 15 = start marker, silent inter-symbol guard for adjacent nibbles).
+// The audio nonce is physically transmitted via the Web Audio API using the
+// protocol agreed with the mobile decoder (16 slots, 60 ms symbols, slot 15 =
+// start marker, silent inter-symbol guard for adjacent nibbles).
+//
+// BAND: fixed at 17–18.5 kHz (DEFAULT_PROTOCOL). On-device TR-0 testing showed
+// laptop speakers barely radiate 19–20 kHz (phone never saw the start marker →
+// decode 0%); 17–18.5 kHz emits strongly (100% physical loopback) while 17 kHz
+// keeps the audible 16 kHz out. B's decoder uses the same band, so this is the
+// single supported band — no user-selectable presets.
 export function SessionTokenPanel() {
   const session = useSessionStore((s) => s.session);
   const token = useSessionStore((s) => s.token);
@@ -48,7 +40,6 @@ export function SessionTokenPanel() {
   const emitterRef = useRef<UltrasonicEmitter | null>(null);
   const [emitting, setEmitting] = useState(false);
   const [gain, setGain] = useState(0.6);
-  const [bandIdx, setBandIdx] = useState(0);
   const [audioError, setAudioError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -57,14 +48,11 @@ export function SessionTokenPanel() {
     return () => stopTokenPolling();
   }, [active, startTokenPolling, stopTokenPolling]);
 
-  // Lazily create the emitter engine.
+  // Lazily create the emitter engine. Band is fixed at DEFAULT_PROTOCOL
+  // (17–18.5 kHz) — the single device-verified band shared with B's decoder.
   function ensureEmitter(): UltrasonicEmitter {
     if (!emitterRef.current) {
-      const band = BAND_PRESETS[bandIdx];
-      emitterRef.current = new UltrasonicEmitter(
-        { ...DEFAULT_PROTOCOL, bandLowHz: band.low, bandHighHz: band.high },
-        { gain },
-      );
+      emitterRef.current = new UltrasonicEmitter(DEFAULT_PROTOCOL, { gain });
     }
     return emitterRef.current;
   }
@@ -75,10 +63,9 @@ export function SessionTokenPanel() {
     setAudioError(null);
     try {
       const em = ensureEmitter();
-      const band = BAND_PRESETS[bandIdx];
-      em.setBand(band.low, band.high);
       em.setGain(gain);
-      await em.start(token.audio_nonce, 1000);
+      // repeatMs omitted → emitter default 600 ms (frame ≈540 ms, near-continuous).
+      await em.start(token.audio_nonce);
       setEmitting(true);
     } catch (e) {
       setAudioError(e instanceof Error ? e.message : String(e));
@@ -94,7 +81,7 @@ export function SessionTokenPanel() {
   // Push new nonce to the running emitter whenever the token rotates.
   useEffect(() => {
     if (emitting && token?.audio_nonce) {
-      emitterRef.current?.update(token.audio_nonce, 1000);
+      emitterRef.current?.update(token.audio_nonce); // default 600 ms repeat
     }
   }, [emitting, token?.audio_nonce]);
 
@@ -151,7 +138,14 @@ export function SessionTokenPanel() {
       <CardContent className="space-y-4">
         <div className="flex flex-col items-center gap-3 rounded-lg border bg-muted/20 p-6">
           {active && token ? (
-            <QRCodeSVG value={token.qr_token} size={200} includeMargin />
+            // App expects "sessionId|qrToken" (raw.contains('|') → split).
+            // Without session_id, verify sends an empty id → backend 404
+            // "session not found" ("세션이 없다"). This is the real fix.
+            <QRCodeSVG
+              value={`${session.session_id}|${token.qr_token}`}
+              size={200}
+              includeMargin
+            />
           ) : (
             <div className="flex h-[200px] w-[200px] items-center justify-center rounded bg-muted text-sm text-muted-foreground">
               토큰 대기 중…
@@ -213,29 +207,10 @@ export function SessionTokenPanel() {
               onChange={(e) => setGain(Number(e.target.value))}
               className="w-full accent-primary"
             />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground">주파수 대역</label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-              value={bandIdx}
-              onChange={(e) => {
-                const idx = Number(e.target.value);
-                setBandIdx(idx);
-                const b = BAND_PRESETS[idx];
-                emitterRef.current?.setBand(b.low, b.high);
-              }}
-            >
-              {BAND_PRESETS.map((b, i) => (
-                <option key={b.label} value={i}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
             <p className="text-[11px] text-muted-foreground">
-              강의실이 크면 게인↑/저역대(17–19kHz)로 도달거리를 늘리세요. 근접성은
-              통과 여부(boolean)로만 판정되며 위치 원자료는 수집하지 않습니다.
+              대역 17–18.5kHz 고정(실기기 검증). 강의실이 크면 게인을 높여
+              도달거리를 늘리세요. 근접성은 통과 여부(boolean)로만 판정되며 위치
+              원자료는 수집하지 않습니다.
             </p>
           </div>
 
