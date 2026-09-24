@@ -18,6 +18,7 @@ tags:
   - name: health
   - name: auth
   - name: devices
+  - name: courses
   - name: sessions
   - name: attendance
   - name: sse
@@ -36,6 +37,33 @@ paths:
               schema: { $ref: '#/components/schemas/Health' }
 
   # ---------------------------------------------------------------- auth
+  /auth/register:
+    post:
+      tags: [auth]
+      summary: Register a new account (student/professor)
+      description: >
+        Creates an account with a bcrypt/argon2-hashed password. Student
+        accounts must use a @wku.ac.kr email (identity defense). Duplicate
+        emails are rejected with 409.
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterUserRequest' }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserOut' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /auth/login:
     post:
       tags: [auth]
@@ -167,6 +195,82 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceBinding' }
+
+  # ------------------------------------------------------------- courses
+  /courses:
+    post:
+      tags: [courses]
+      summary: Professor creates a course
+      operationId: createCourse
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateCourseRequest' }
+      responses:
+        '201':
+          description: Course created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Course' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    get:
+      tags: [courses]
+      summary: List courses owned by the authenticated professor
+      operationId: listCourses
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Courses
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Course' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /courses/{course_id}/enrollments:
+    post:
+      tags: [courses]
+      summary: Enroll a student in a course (professor-owned course only)
+      operationId: enrollStudent
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/EnrollRequest' }
+      responses:
+        '201':
+          description: Student enrolled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Enrollment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Already enrolled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [courses]
+      summary: List enrollments for a course (professor-owned course only)
+      operationId: listEnrollments
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '200':
+          description: Enrollments
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Enrollment' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------ sessions
   /sessions:
@@ -386,6 +490,11 @@ components:
       in: path
       required: true
       schema: { type: string }
+    CourseId:
+      name: course_id
+      in: path
+      required: true
+      schema: { type: string }
 
   responses:
     Unauthorized:
@@ -395,6 +504,16 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
     BadRequest:
       description: Bad request
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Forbidden:
+      description: Forbidden
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Not found
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -431,6 +550,49 @@ components:
     Role:
       type: string
       enum: [student, professor]
+
+    RegisterUserRequest:
+      type: object
+      required: [email, password, role]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password, minLength: 8 }
+        role: { $ref: '#/components/schemas/Role' }
+        name: { type: string, nullable: true }
+
+    UserOut:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        role: { $ref: '#/components/schemas/Role' }
+        name: { type: string, nullable: true }
+
+    CreateCourseRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string }
+
+    Course:
+      type: object
+      properties:
+        id: { type: string }
+        professor_id: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+
+    EnrollRequest:
+      type: object
+      required: [student_id]
+      properties:
+        student_id: { type: string }
+
+    Enrollment:
+      type: object
+      properties:
+        course_id: { type: string }
+        student_id: { type: string }
 
     DeviceBinding:
       type: object

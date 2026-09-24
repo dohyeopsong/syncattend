@@ -1,0 +1,12 @@
+# Python virtualenv & caches (backend-local; root shared config owned by C)
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local SQLite / temp DBs used for checks
+*.db
+_alembic_check.db
+
+# Env
+.env

@@ -1,18 +1,46 @@
 """
-Syncattend backend (FastAPI) — scaffold entrypoint.
+Syncattend backend (FastAPI) — application entrypoint.
 
 Owner: A (backend). Implements the contract in ../contracts/openapi.yaml.
-Only the /health endpoint is wired in this scaffold; feature routers
-(auth, devices, sessions, attendance, sse) are stubbed for parallel work.
+Wires the real feature routers (auth, devices, courses, sessions, attendance, sse),
+structured logging + request-ID middleware, and a /health check that probes
+DB and Redis connectivity.
 """
-from fastapi import APIRouter, FastAPI
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.config import get_settings
+from app.db import get_sessionmaker
+from app.observability import RequestIDMiddleware, configure_logging
+from app.redis_client import get_redis
+from app.routers import attendance, auth, courses, devices, sessions, sse
+from app.schemas import Health
 
 settings = get_settings()
+configure_logging(settings.log_level)
 
-app = FastAPI(title="Syncattend (SDAS) API", version=settings.version)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Warm the Redis client on startup; close it on shutdown.
+    redis = get_redis()
+    try:
+        yield
+    finally:
+        try:
+            await redis.aclose()
+        except Exception:
+            pass
+
+
+app = FastAPI(
+    title="Syncattend (SDAS) API", version=settings.version, lifespan=lifespan
+)
+
+app.add_middleware(RequestIDMiddleware)
 
 # Web dashboard (owner C) runs on :5173 in dev.
 app.add_middleware(
@@ -24,20 +52,41 @@ app.add_middleware(
 )
 
 
-@app.get("/health", tags=["health"])
-async def get_health() -> dict:
-    """Liveness check — contract operationId: getHealth."""
-    return {"status": "ok", "service": settings.app_name, "version": settings.version}
+async def _check_db() -> str:
+    try:
+        async with get_sessionmaker()() as session:
+            await session.execute(text("SELECT 1"))
+        return "ok"
+    except Exception:
+        return "down"
 
 
-# --- feature router stubs (to be implemented by owner A) --------------------
-# Each router is mounted but intentionally empty so the app boots cleanly and
-# teammates can see where endpoints will live.
-auth_router = APIRouter(prefix="/auth", tags=["auth"])
-devices_router = APIRouter(prefix="/devices", tags=["devices"])
-sessions_router = APIRouter(prefix="/sessions", tags=["sessions"])
-attendance_router = APIRouter(prefix="/attendance", tags=["attendance"])
-sse_router = APIRouter(prefix="/sse", tags=["sse"])
+async def _check_redis() -> str:
+    try:
+        await get_redis().ping()
+        return "ok"
+    except Exception:
+        return "down"
 
-for _r in (auth_router, devices_router, sessions_router, attendance_router, sse_router):
-    app.include_router(_r)
+
+@app.get("/health", response_model=Health, tags=["health"], operation_id="getHealth")
+async def get_health() -> Health:
+    """Liveness + dependency check — contract operationId: getHealth."""
+    db_status = await _check_db()
+    redis_status = await _check_redis()
+    overall = "ok" if db_status == "ok" and redis_status == "ok" else "degraded"
+    return Health(
+        status=overall,
+        service=settings.app_name,
+        version=settings.version,
+        db=db_status,
+        redis=redis_status,
+    )
+
+
+app.include_router(auth.router)
+app.include_router(devices.router)
+app.include_router(courses.router)
+app.include_router(sessions.router)
+app.include_router(attendance.router)
+app.include_router(sse.router)
