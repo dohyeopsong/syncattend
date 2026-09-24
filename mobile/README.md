@@ -124,6 +124,31 @@ play the 18–20 kHz frames → read the live success rate → record it below.
   numbers are pending a hardware run; the software DSP spike above stands in for
   the automated portion.
 
+### Stage-0 hardware feasibility (physical emit+receive, measured 2026-09-24)
+Before the app-based Stage-1 loopback, we verified the *prerequisite* physical
+question with a tone generator (`docs/dev-log/stage0_ultrasonic_tone.py`) on the
+laptop speaker and a spectrum-analyzer app on the phone. This is NOT the full
+nonce decode — it only proves the acoustic channel exists in the target band.
+
+- Hardware: laptop = **MacBook Air (Mac14,15 / M2)** built-in speaker, output
+  48 kHz; phone = **iPhone** + spectrum-analyzer app. Volume ~81%, quiet room.
+- **Sweep 12→22 kHz:** spectral line visible up to **~25 kHz** → speaker emits
+  and phone mic receives across the entire ultrasonic band of interest. ✅
+- **Steps 15/16/17/18/19/20 kHz:** all **clearly visible** peaks at close range. ✅
+- **Distance (19 kHz, open space):** still "moderate" peak at **~10 m**. ✅
+  (Good classroom coverage; also means the signal carries far in open air.)
+- **Wall attenuation (19 kHz):** with the door **closed**, at a spot ~5 m away
+  behind the door, the signal was **noticeably weaker** than in-room. → supports
+  the design premise that walls/doors attenuate the token, giving a proximity
+  basis. ⚠️ Caveat: that point was also ~5 m from the speaker, so distance decay
+  and wall blocking are not fully separated in this single measurement; a
+  same-distance in-room vs. through-door comparison is still worth doing.
+
+**Verdict:** the project's #1 technical risk (TR-0, jev 0.83 — "can a laptop
+speaker emit 18–20 kHz that a phone mic decodes?") passes at the hardware level.
+Next: Stage-1 (C's emitter plays real nonce frames → this app decodes → live
+success rate), then fill the checklist rates above.
+
 
 
 ## Contract gaps to report to Owner A
