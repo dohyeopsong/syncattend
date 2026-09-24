@@ -60,6 +60,7 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
   final _email = TextEditingController();
   final _code = TextEditingController();
   bool _codeSent = false;
+  bool _prefilled = false;
 
   @override
   void dispose() {
@@ -68,15 +69,82 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
     super.dispose();
   }
 
+  void _snack(String msg, {bool error = false}) {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: error ? Colors.red.shade700 : null,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _requestCode() async {
+    final notifier = ref.read(authControllerProvider.notifier);
+    final ok = await notifier.requestReauthCode(_email.text);
+    if (!mounted) return;
+    if (ok) {
+      setState(() => _codeSent = true);
+      _snack('인증 코드를 발송했습니다. 이메일을 확인하세요.');
+    } else {
+      _snack(ref.read(authControllerProvider).error ?? '코드 요청에 실패했습니다.',
+          error: true);
+    }
+  }
+
+  Future<void> _confirmCode() async {
+    final notifier = ref.read(authControllerProvider.notifier);
+    final ok = await notifier.confirmReauth(_email.text, _code.text);
+    if (!mounted) return;
+    if (ok) {
+      _snack('재바인딩이 완료되었습니다.');
+      // Routing to home is driven by AuthPhase.ready in the app shell.
+    } else {
+      _snack(ref.read(authControllerProvider).error ?? '코드 확인에 실패했습니다.',
+          error: true);
+    }
+  }
+
+  Future<void> _backToLogin() async {
+    await ref.read(authControllerProvider.notifier).logout();
+  }
+
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authControllerProvider);
-    final notifier = ref.read(authControllerProvider.notifier);
+
+    // Prefill the email used at login exactly once, so the user need not retype
+    // it (retyping was a source of the 422 email-validation failure).
+    if (!_prefilled) {
+      final prefill = auth.lastEmail;
+      if (prefill != null && prefill.isNotEmpty) {
+        _email.text = prefill;
+      }
+      _prefilled = true;
+    }
+
     return Scaffold(
-      appBar: AppBar(title: const Text('기기 변경 재인증')),
+      appBar: AppBar(
+        title: const Text('기기 변경 재인증'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: '로그인으로 돌아가기',
+          onPressed: auth.busy ? null : _backToLogin,
+        ),
+        actions: [
+          TextButton(
+            onPressed: auth.busy ? null : _backToLogin,
+            child: const Text('로그아웃'),
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
               '다른 기기(또는 새 UUID)가 감지되었습니다. 학교 이메일'
@@ -87,6 +155,9 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
             TextField(
               controller: _email,
               keyboardType: TextInputType.emailAddress,
+              autocorrect: false,
+              enableSuggestions: false,
+              textInputAction: TextInputAction.next,
               decoration: const InputDecoration(
                 labelText: '학교 이메일 (@wku.ac.kr)',
                 border: OutlineInputBorder(),
@@ -97,41 +168,57 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
               TextField(
                 controller: _code,
                 keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => auth.busy ? null : _confirmCode(),
                 decoration: const InputDecoration(
                   labelText: '인증 코드',
                   border: OutlineInputBorder(),
                 ),
               ),
-            const SizedBox(height: 16),
-            if (auth.error != null)
-              Text(auth.error!, style: const TextStyle(color: Colors.red)),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: auth.busy
-                    ? null
-                    : () async {
-                        if (!_codeSent) {
-                          final ok = await notifier
-                              .requestReauthCode(_email.text.trim());
-                          if (ok && mounted) {
-                            setState(() => _codeSent = true);
-                          }
-                        } else {
-                          await notifier.confirmReauth(
-                              _email.text.trim(), _code.text.trim());
-                        }
-                      },
-                child: auth.busy
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(_codeSent ? '코드 확인 & 재바인딩' : '인증 코드 받기'),
+            if (auth.error != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: Colors.red.shade700),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        auth.error!,
+                        style: TextStyle(color: Colors.red.shade900),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+            ],
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: auth.busy
+                  ? null
+                  : (_codeSent ? _confirmCode : _requestCode),
+              child: auth.busy
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(_codeSent ? '코드 확인 & 재바인딩' : '인증 코드 받기'),
             ),
+            if (_codeSent) ...[
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: auth.busy ? null : _requestCode,
+                child: const Text('코드 다시 받기'),
+              ),
+            ],
           ],
         ),
       ),

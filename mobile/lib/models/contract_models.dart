@@ -265,10 +265,36 @@ class ApiError implements Exception {
 
   factory ApiError.fromJson(Map<String, dynamic> json, {int? statusCode}) =>
       ApiError(
-        detail: json['detail'] as String? ?? 'Unknown error',
+        detail: _parseDetail(json['detail']),
         code: json['code'] as String?,
         statusCode: statusCode,
       );
+
+  /// FastAPI returns `detail` either as a string (HTTPException) or as a list of
+  /// validation errors for 422 (`[{loc, msg, type}, ...]`). Flatten the list
+  /// form into a human-readable message instead of dropping it as "Unknown".
+  static String _parseDetail(Object? detail) {
+    if (detail is String && detail.isNotEmpty) return detail;
+    if (detail is List) {
+      final msgs = <String>[];
+      for (final item in detail) {
+        if (item is Map) {
+          final msg = item['msg']?.toString();
+          final loc = item['loc'];
+          final field = (loc is List && loc.isNotEmpty)
+              ? loc.where((p) => p != 'body').join('.')
+              : null;
+          if (msg != null && msg.isNotEmpty) {
+            msgs.add(field != null && field.isNotEmpty ? '$field: $msg' : msg);
+          }
+        } else if (item != null) {
+          msgs.add(item.toString());
+        }
+      }
+      if (msgs.isNotEmpty) return msgs.join('\n');
+    }
+    return 'Unknown error';
+  }
 
   @override
   String toString() => 'ApiError($statusCode, $code): $detail';
