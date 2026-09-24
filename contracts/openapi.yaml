@@ -654,7 +654,13 @@ components:
       properties:
         session_id: { type: string }
         qr_token: { type: string }
-        audio_nonce: { type: string }
+        audio_nonce:
+          type: string
+          pattern: '^[0-9a-e]{8}$'
+          description: >-
+            acoustic hex nonce: 8 nibbles, excludes 'f' which is the ultrasonic
+            start-marker slot. Transmitted whole over the ultrasonic channel.
+          example: a1b2c3d4
         expires_in: { type: integer, example: 15 }
         window_open: { type: boolean }
         window_remaining: { type: integer }
@@ -665,7 +671,13 @@ components:
       properties:
         session_id: { type: string }
         qr_token: { type: string }
-        audio_nonce: { type: string }
+        audio_nonce:
+          type: string
+          pattern: '^[0-9a-e]{8}$'
+          description: >-
+            acoustic hex nonce: 8 nibbles, excludes 'f' which is the ultrasonic
+            start-marker slot. Must equal the nonce decoded from the ultrasonic signal.
+          example: a1b2c3d4
         device_uuid: { type: string, format: uuid }
 
     VerifyResult:

@@ -12,6 +12,8 @@ path; this file pins the service invariants in isolation.
 """
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app.config import get_settings
@@ -50,6 +52,23 @@ async def test_issue_tokens_sets_15s_ttl_on_all_keys(redis):
     for key in (_qr_key(sid), _audio_key(sid), _pair_key(sid, qr)):
         remaining = await redis.ttl(key)
         assert 0 < remaining <= ttl, f"{key} ttl={remaining}"
+
+
+_AUDIO_NONCE_RE = re.compile(r"^[0-9a-e]{8}$")
+
+
+async def test_audio_nonce_is_acoustic_safe_hex(redis):
+    """audio_nonce must be 8 hex nibbles from 0-e (no 'f' = start-marker slot).
+
+    The ultrasonic transport can only carry hex nibbles and reserves slot 15
+    ('f') as the START MARKER, so the issued nonce must match ^[0-9a-e]{8}$ to
+    survive the emitter/decoder path whole. Sample many issues since generation
+    is random.
+    """
+    for i in range(200):
+        _qr, audio = await issue_tokens(redis, f"sess-fmt-{i}")
+        assert _AUDIO_NONCE_RE.match(audio), f"non-acoustic-safe audio_nonce: {audio!r}"
+        assert "f" not in audio  # explicit: 'f' collides with start marker
 
 
 async def test_cross_verify_matches_only_issued_pair(redis):
