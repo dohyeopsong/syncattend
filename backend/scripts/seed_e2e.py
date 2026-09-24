@@ -32,7 +32,7 @@ from app.security import hash_password
 # --- Fixed seed identities (documented for B/C) ------------------------------
 SEED_PASSWORD = "seedpass123"
 
-PROFESSOR = {"email": "prof.e2e@wku.ac.kr", "name": "E2E Professor", "role": "professor"}
+PROFESSOR = {"email": "prof.e2e@wku.ac.kr", "name": "김영수", "role": "professor"}
 STUDENTS = [
     {"email": "student1.e2e@wku.ac.kr", "name": "E2E Student One", "role": "student"},
     {"email": "student2.e2e@wku.ac.kr", "name": "E2E Student Two", "role": "student"},
@@ -49,43 +49,51 @@ _DEPT_AI = "인공지능융합학과"
 COURSES = [
     # --- 컴퓨터·소프트웨어공학과 ---
     {"name": "컴퓨터개론",          "code": "374140", "credits": 3.0,
+     "professor_name": "김영수",
      "day_of_week": 0, "start_period": 1, "end_period": 2, "location": "공대 401"},
     {"name": "C언어프로그래밍",      "code": "374142", "credits": 3.0,
+     "professor_name": "이정민",
      "day_of_week": 0, "start_period": 3, "end_period": 4, "location": "공대 402"},
     {"name": "파이썬프로그래밍",     "code": "374141", "credits": 3.0,
+     "professor_name": "박지훈",
      "day_of_week": 1, "start_period": 1, "end_period": 2, "location": "공대 403"},
     {"name": "고급프로그래밍언어",   "code": "374143", "credits": 3.0,
+     "professor_name": "최수현",
      "day_of_week": 1, "start_period": 3, "end_period": 4, "location": "공대 404"},
     {"name": "창의공학설계",         "code": "374004", "credits": 3.0,
+     "professor_name": "정민경",
      "day_of_week": 2, "start_period": 1, "end_period": 2, "location": "공대 405"},
     {"name": "자료구조",             "code": "374150", "credits": 3.0,
+     "professor_name": "김영수",
      "day_of_week": 2, "start_period": 3, "end_period": 4, "location": "공대 406"},
     {"name": "객체지향프로그래밍",   "code": "374151", "credits": 3.0,
+     "professor_name": "이정민",
      "day_of_week": 3, "start_period": 1, "end_period": 2, "location": "공대 407"},
     {"name": "웹(HTML5)프로그래밍",  "code": "374152", "credits": 3.0,
+     "professor_name": "한도윤",
      "day_of_week": 4, "start_period": 3, "end_period": 4, "location": "공대 408"},
     # --- 콘텐츠미디어SW융합전공 (autocomplete master data) ---
     {"name": "데이터구조",           "code": "375210", "credits": 3.0,
-     "department": _DEPT_CONTENT,
+     "department": _DEPT_CONTENT, "professor_name": "박지훈",
      "day_of_week": 0, "start_period": 5, "end_period": 6, "location": "미디어관 201"},
     {"name": "컴퓨팅적사고력",       "code": "375211", "credits": 3.0,
-     "department": _DEPT_CONTENT,
+     "department": _DEPT_CONTENT, "professor_name": "최수현",
      "day_of_week": 1, "start_period": 5, "end_period": 6, "location": "미디어관 202"},
     {"name": "과학적데이터처리",     "code": "375212", "credits": 3.0,
-     "department": _DEPT_CONTENT,
+     "department": _DEPT_CONTENT, "professor_name": "정민경",
      "day_of_week": 2, "start_period": 5, "end_period": 6, "location": "미디어관 203"},
     {"name": "디지털콘텐츠디자인",   "code": "375213", "credits": 3.0,
-     "department": _DEPT_CONTENT,
+     "department": _DEPT_CONTENT, "professor_name": "한도윤",
      "day_of_week": 3, "start_period": 3, "end_period": 4, "location": "미디어관 204"},
     {"name": "인터랙티브미디어",     "code": "375214", "credits": 3.0,
-     "department": _DEPT_CONTENT,
+     "department": _DEPT_CONTENT, "professor_name": "이정민",
      "day_of_week": 4, "start_period": 5, "end_period": 6, "location": "미디어관 205"},
     # --- 인공지능융합학과 ---
     {"name": "소프트웨어융합개론",   "code": "376320", "credits": 3.0,
-     "department": _DEPT_AI,
+     "department": _DEPT_AI, "professor_name": "박지훈",
      "day_of_week": 0, "start_period": 7, "end_period": 8, "location": "AI관 301"},
     {"name": "기계학습기초",         "code": "376321", "credits": 3.0,
-     "department": _DEPT_AI,
+     "department": _DEPT_AI, "professor_name": "최수현",
      "day_of_week": 2, "start_period": 7, "end_period": 8, "location": "AI관 302"},
 ]
 # The live attendance session opens against this course (student1 pre-bound device).
@@ -105,6 +113,12 @@ async def _get_or_create_user(db: AsyncSession, spec: dict) -> User:
         await db.execute(select(User).where(User.email == spec["email"]))
     ).scalar_one_or_none()
     if user is not None:
+        # Backfill display name on re-seed (email/password stay untouched — B/C
+        # rely on them for login). Keeps a pre-existing "E2E Professor" row in
+        # sync with the realistic seed name.
+        if user.name != spec["name"]:
+            user.name = spec["name"]
+            await db.flush()
         return user
     user = User(
         email=spec["email"],
@@ -118,10 +132,16 @@ async def _get_or_create_user(db: AsyncSession, spec: dict) -> User:
 
 
 async def _get_or_create_course(
-    db: AsyncSession, professor_id: str, spec: dict, professor_name: str | None
+    db: AsyncSession, professor_id: str, spec: dict, default_professor_name: str | None
 ) -> Course:
     """Idempotent by (professor_id, name). Fills schedule/catalog metadata and
-    backfills those fields on a pre-existing row so re-seeds stay current."""
+    backfills those fields on a pre-existing row so re-seeds stay current.
+
+    `professor_name` is a display-only 담당교수 name taken per-course from the
+    spec (falls back to default_professor_name); it does NOT affect ownership —
+    professor_id (the session-opening owner) is the same seed professor for all.
+    """
+    display_name = spec.get("professor_name") or default_professor_name
     course = (
         await db.execute(
             select(Course).where(
@@ -135,7 +155,7 @@ async def _get_or_create_course(
             name=spec["name"],
             code=spec.get("code"),
             department=spec.get("department", _DEPT),
-            professor_name=professor_name,
+            professor_name=display_name,
             day_of_week=spec.get("day_of_week"),
             start_period=spec.get("start_period"),
             end_period=spec.get("end_period"),
@@ -148,7 +168,7 @@ async def _get_or_create_course(
     # Backfill/refresh schedule metadata on existing rows (idempotent update).
     course.code = spec.get("code")
     course.department = spec.get("department", _DEPT)
-    course.professor_name = professor_name
+    course.professor_name = display_name
     course.day_of_week = spec.get("day_of_week")
     course.start_period = spec.get("start_period")
     course.end_period = spec.get("end_period")
