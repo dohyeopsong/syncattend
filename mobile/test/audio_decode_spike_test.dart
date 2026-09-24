@@ -453,4 +453,67 @@ void main() {
           reason: 'guarded frames must decode arbitrary nonces reliably');
     });
   });
+
+  group('Audio decode — backend hex[0-e]{8} alphabet (aligned nonce)', () {
+    // Owner A now issues `audio_nonce = hex[0-e]{8}` — exactly 8 nibbles from the
+    // alphabet 0..e (no `f`, since slot 0xF is the acoustic start marker). This
+    // means the acoustic frame carries the REAL server nonce verbatim, so the
+    // decoded string can be sent straight back as VerifyRequest.audioNonce.
+    //
+    // These deterministic cases assert exact round-trip for representative
+    // nonces, including the adjacent-identical patterns that motivated C's
+    // silent inter-symbol guard. A nonce containing `f` can no longer occur
+    // under the new alphabet, so the old 0xF→0xE marker-collision remap is moot.
+    const cases = <String>['a1b2c3d4', '0e0e0e0e', '77777777'];
+
+    // Guard against a decoder/const drift away from the agreed alphabet.
+    test('decoder frame contract matches backend alphabet', () {
+      final decoder = makeDecoder();
+      expect(AudioNonceDecoder.defaultNonceNibbles, 8);
+      expect(AudioNonceDecoder.nonceAlphabet, '0123456789abcde');
+      expect(decoder.markerSlot, toneSlots - 1); // 0xF reserved as marker
+      for (final c in cases) {
+        expect(c.length, AudioNonceDecoder.defaultNonceNibbles);
+        expect(RegExp(r'^[0-9a-e]{8}$').hasMatch(c), isTrue,
+            reason: '$c must be a valid hex[0-e]{8} nonce (no f)');
+      }
+    });
+
+    for (final hex in cases) {
+      test('round-trips $hex from a guarded frame (20dB + jitter)', () async {
+        final decoder = makeDecoder();
+        final emitter = _Emitter(
+          sampleRate: sampleRate,
+          toneSlots: toneSlots,
+          symbolMs: symbolMs,
+          decoder: decoder,
+        );
+        final rng = math.Random(hex.hashCode);
+        final nibbles =
+            hex.split('').map((c) => int.parse(c, radix: 16)).toList();
+        const windowSamples = (sampleRate * symbolMs) ~/ 1000;
+        const hopsPerSymbol = 8;
+        const hop = windowSamples ~/ hopsPerSymbol;
+        final offset = rng.nextInt(windowSamples);
+        final clean = emitter.buildGuardedFrame(nibbles);
+        const tail = windowSamples;
+        final padded = Float64List(offset + clean.length + tail)
+          ..setRange(offset, offset + clean.length, clean);
+        final noisy = _addNoise(padded, 20, rng);
+        final windows = <Float64List>[];
+        for (var s = 0; s + windowSamples <= noisy.length; s += hop) {
+          windows.add(Float64List.sublistView(noisy, s, s + windowSamples));
+        }
+        final decoded = await decoder
+            .decodeStreamOversampled(
+              Stream.fromIterable(windows),
+              hopsPerSymbol: hopsPerSymbol,
+            )
+            .firstWhere((_) => true, orElse: () => '')
+            .timeout(const Duration(seconds: 2), onTimeout: () => '');
+        expect(decoded, hex,
+            reason: 'aligned hex nonce must round-trip exactly for verify');
+      });
+    }
+  });
 }

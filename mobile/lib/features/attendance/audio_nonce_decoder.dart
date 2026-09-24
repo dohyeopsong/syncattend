@@ -10,11 +10,22 @@ import 'package:fftea/fftea.dart';
 /// half of the "professor emits ↔ student decodes" spike. The exact protocol
 /// (frequency map, symbol length, encoding) MUST be agreed with owner C.
 ///
-/// PROTOCOL (proposed — confirm with owner C before real-device testing):
+/// PROTOCOL (CONFIRMED with owner A's contract + owner C's emitter, 2026-09-25):
 ///  - Band: 18–20 kHz split into N tone slots (default 16 → 4 bits/symbol).
 ///  - Symbol length: [symbolMs] ms per symbol (default 60ms).
-///  - Framing: a start marker tone (highest slot) precedes the nonce symbols.
-///  - Encoding: nonce transmitted as hex nibbles, each nibble = one tone slot.
+///  - Framing: a start marker tone (highest slot, 0xF) precedes the nonce
+///    symbols. Because slot 15 == 0xF is reserved as the marker, the nonce
+///    alphabet is the 15 remaining nibbles [0-e] only.
+///  - Encoding: nonce transmitted as [nonceNibbles] hex nibbles, each nibble =
+///    one tone slot.
+///
+/// ALPHABET ALIGNMENT: the backend now issues `audio_nonce` as `hex[0-e]{8}`
+/// (8 nibbles, no `f`), which matches this decoder's frame exactly — an acoustic
+/// round-trip of the *real* server nonce is now end-to-end valid. (Previously
+/// the backend issued a base64url `token_urlsafe` string whose non-hex chars
+/// were silently dropped by the emitter, so no faithful round-trip was possible.
+/// No `f` can appear in a well-formed nonce, so the old `0xF→0xE` marker-collision
+/// remap can no longer corrupt a real nonce.)
 ///
 /// If real-classroom feasibility is insufficient, the fallback (per TR-0) is a
 /// lower audible band or an on-screen assist code; this decoder's slot map is
@@ -44,6 +55,19 @@ class AudioNonceDecoder {
   final double detectionThreshold;
 
   final FFT _fft;
+
+  /// The tone slot reserved as the frame START MARKER: the highest slot
+  /// ([toneSlots] - 1), i.e. 15 == 0xF for the default 16-slot map. Reserving
+  /// this slot is why the nonce alphabet excludes `f` (see [nonceAlphabet]).
+  int get markerSlot => toneSlots - 1;
+
+  /// Nibbles carried per acoustic nonce frame. Matches the backend's
+  /// `audio_nonce = hex[0-e]{8}`.
+  static const int defaultNonceNibbles = 8;
+
+  /// The valid hex nibbles a well-formed acoustic nonce may contain: `0..e`.
+  /// `f` is excluded because slot 0xF is the start marker ([markerSlot]).
+  static const String nonceAlphabet = '0123456789abcde';
 
   int get _windowSize => _fft.size;
 
@@ -101,12 +125,11 @@ class AudioNonceDecoder {
   Stream<String> decodeStream(Stream<Float64List> windows) async* {
     final symbols = <int>[];
     var receiving = false;
-    const startSlotIsMarker = true; // highest slot = start marker
 
     await for (final window in windows) {
       final slot = decodeSlot(window);
       if (slot == null) continue;
-      final isMarker = startSlotIsMarker && slot == toneSlots - 1;
+      final isMarker = slot == markerSlot; // highest slot (0xF) = start marker
 
       if (isMarker) {
         if (receiving && symbols.isNotEmpty) {
@@ -118,8 +141,9 @@ class AudioNonceDecoder {
       }
       if (receiving) {
         symbols.add(slot);
-        // A nonce of 8 hex nibbles (32-bit) is a reasonable default frame.
-        if (symbols.length >= 8) {
+        // A nonce of [defaultNonceNibbles] hex nibbles matches the backend's
+        // hex[0-e]{8} audio_nonce.
+        if (symbols.length >= defaultNonceNibbles) {
           yield _symbolsToHex(symbols);
           symbols.clear();
           receiving = false;
@@ -156,9 +180,9 @@ class AudioNonceDecoder {
   Stream<String> decodeStreamOversampled(
     Stream<Float64List> windows, {
     int hopsPerSymbol = 4,
-    int nonceNibbles = 8,
+    int nonceNibbles = defaultNonceNibbles,
   }) async* {
-    final markerSlot = toneSlots - 1;
+    final markerSlot = this.markerSlot;
     final readings = <int?>[];
     await for (final window in windows) {
       readings.add(decodeSlot(window));

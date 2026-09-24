@@ -213,6 +213,50 @@ speaker emit 18–20 kHz that a phone mic decodes?") passes at the hardware leve
 Next: Stage-1 (C's emitter plays real nonce frames → this app decodes → live
 success rate), then fill the checklist rates above.
 
+### Stage-1 physical loopback (real nonce round-trip, measured 2026-09-25)
+The full round trip — **synthesize a nonce frame with the emitter protocol →
+play on the laptop speaker → capture through the air on the laptop mic → decode
+with the SAME algorithm as `audio_nonce_decoder.dart`** — was measured with
+`docs/dev-log/stage1_audio_loopback.py` (pure stdlib DFT + ffmpeg capture, no
+iOS build required as a substitute path while device deployment is pending).
+
+- Hardware: **MacBook Air (M2)** speaker → air → built-in mic, volume ~81%,
+  quiet room, ~zero-distance baseline (same-device loopback).
+- Protocol: 18–20 kHz, 16 slots (4 bits/symbol), 60 ms symbol, highest slot =
+  start marker, intra-symbol silent guard (the emitter's adjacent-nibble fix).
+- **Software file loopback (synth→decode, no mic):** 5/6 nonces exact-match incl.
+  identical-adjacent (`0e0e0e0e`, `77777777`, `aa11bb22`). ✅
+- **Physical loopback battery (speaker→air→mic, 6 nonces × 2):** **10/12 = 83.3%.**
+  All failures were `deadbeef` only. ✅ for every `f`-free nonce (100%).
+- **Root cause of the `f` failure (NOT a transmission error):** nibble `0xF`
+  collides with the start-marker slot (slot 15), so both emitter
+  (`ultrasonicEmitter.ts nonceToNibbles`) and this decoder remap `0xF → 0xE`.
+  `deadbeef` is therefore encoded as `deadbeee` *before* it ever hits the air.
+- **⚠️ ARCHITECTURE FINDING (report to Owner A + C):** the backend issues
+  `audio_nonce = secrets.token_urlsafe(12)` (base64url, e.g. `as-WjD9Fw_jT4sWk`),
+  but the acoustic protocol transmits **hex nibbles**. The emitter's
+  `nonceToNibbles` silently drops non-hex chars, so only the hex-looking subset
+  of the real nonce is actually carried over audio. Options: (a) backend issues a
+  short **hex** audio_nonce (e.g. 8 hex chars, avoiding `f`) for the acoustic
+  channel while keeping the urlsafe QR token; (b) widen the acoustic alphabet.
+  Until resolved, physical decode of a *real* backend nonce is not yet end-to-end.
+- **✅ ALIGNED (A → C → B, 2026-09-25):** owner A now issues
+  `audio_nonce = hex[0-e]{8}` (8 nibbles, `f` excluded because slot 0xF is the
+  start marker), C's emitter transmits it verbatim, and this decoder's frame is
+  already `hex[0-e]{8}` (see `AudioNonceDecoder.nonceAlphabet` /
+  `defaultNonceNibbles` / `markerSlot`) — so the acoustic round-trip now carries
+  the **real** server nonce and the decoded string is passed straight into
+  `VerifyRequest.audioNonce`. **Backend now issues hex[0-e]{8} → full
+  end-to-end nonce match.** The `f`-collision case can no longer occur.
+  (Contract lands as A's `audio_nonce` alphabet change; decoder needs no
+  algorithm change — verified by the deterministic `a1b2c3d4 / 0e0e0e0e /
+  77777777` round-trip cases in `test/audio_decode_spike_test.dart`.)
+
+**Verdict:** the acoustic channel carries a real nonce frame and decodes it back
+at the hardware level (physical, not just software) — TR-0's last unverified leg
+is closed for a **hex** nonce. Remaining: align the backend audio_nonce alphabet
+with the acoustic protocol (above), then repeat on an iOS device via
+`AudioLoopbackHarnessScreen` for real cross-device (proximity) numbers.
 
 
 ## Contract gaps to report to Owner A
