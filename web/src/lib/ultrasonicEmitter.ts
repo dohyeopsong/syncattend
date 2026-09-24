@@ -72,16 +72,25 @@ export function markerSlot(proto: EmitterProtocol): number {
 }
 
 /**
- * Parse a hex nonce into nibble slot indices (0..14). Ignores non-hex chars.
- * Nibble 15 (0xF) collides with the marker slot, so the backend nonce is
- * expected to use nibbles 0..E; any 0xF nibble is remapped to 0xE defensively
- * to avoid emitting a false marker mid-frame.
+ * Parse a hex nonce into nibble slot indices (0..14), one nibble per tone slot.
+ *
+ * CONTRACT: the backend now issues `audio_nonce` as pure hex nibbles 0..E
+ * (`hex[0-e]{8}`), so the whole nonce maps 1:1 to slots and NOTHING is lost.
+ * The non-hex `continue` below is therefore dead code for valid input — it only
+ * exists to stay robust against accidental separators/whitespace; a well-formed
+ * backend nonce never triggers it. (Historically the backend emitted
+ * base64url via `token_urlsafe`, which this path silently dropped — that
+ * mismatch was the STAGE-1 root cause and is fixed on the issuer side by A.)
+ *
+ * Nibble 15 (0xF) collides with the START-MARKER slot, so the backend excludes
+ * it (nibbles 0..E). We still remap any 0xF → 0xE DEFENSIVELY so a stray 0xF
+ * can never be transmitted as a false mid-frame marker.
  */
 export function nonceToNibbles(nonce: string): number[] {
   const out: number[] = [];
   for (const ch of nonce.trim().toLowerCase()) {
     const v = parseInt(ch, 16);
-    if (Number.isNaN(v)) continue;
+    if (Number.isNaN(v)) continue; // unreachable for a pure-hex backend nonce
     out.push(v === 0xf ? 0xe : v);
   }
   return out;
