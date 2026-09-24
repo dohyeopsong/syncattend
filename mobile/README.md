@@ -24,6 +24,51 @@ flutter analyze     # must be warning-free
 flutter test        # unit + widget tests
 ```
 
+### Connecting to the live compose backend (integration)
+Bring the stack up (owner C) and point the app at it. **The correct `<host>`
+depends on where the app runs:**
+
+| App runs on | `BACKEND_URL` |
+|-------------|----------------|
+| Android emulator | `http://10.0.2.2:8000` (default) |
+| iOS simulator / desktop (macOS) | `http://localhost:8000` |
+| **Real phone (USB/Wi-Fi)** | `http://<your-laptop-LAN-IP>:8000` (NOT `localhost`) |
+
+```bash
+# from repo root — start backend + Postgres + Redis
+docker compose -f infra/docker-compose.yml up --build -d
+curl localhost:8000/health   # expect {"status":"ok","db":"ok","redis":"ok"}
+
+# real phone example (find your LAN IP with `ipconfig getifaddr en0` on macOS):
+cd mobile
+flutter run --dart-define=USE_MOCK=false --dart-define=BACKEND_URL=http://192.168.0.10:8000
+```
+
+### Student E2E integration test (against the live backend)
+`test/student_e2e_live_test.dart` drives the **real** mobile HTTP client
+(`DioApiClient`) through the whole student happy path (login → getMe →
+registerDevice → verifyAttendance → getMyAttendance) plus a nonce-reuse
+rejection, using raw HTTP only for the professor setup. It **probes `/health`
+and `/auth/register` first and skips cleanly** if the backend is down or broken,
+so it never fails the suite; it runs for real once the backend is healthy.
+```bash
+docker compose -f infra/docker-compose.yml up --build -d
+cd mobile
+flutter test test/student_e2e_live_test.dart \
+    --dart-define=E2E_BACKEND_URL=http://localhost:8000
+```
+
+> ⚠️ **Current backend blocker (report to owner A, 2026-09-25):** with the
+> running compose stack, `/health` is ok but `POST /auth/register` (and any user
+> insert, incl. the seed script) returns **500** —
+> `asyncpg DatatypeMismatchError: column "users.id" is of type uuid but
+> expression is of type character varying`. The DB column is `uuid` while the ORM
+> sends a `VARCHAR` id. Until A aligns the schema/model (uuid column ↔ uuid
+> value, or a VARCHAR(36) column), no account can be created or logged in, so the
+> live student E2E stays **skipped**. The mobile side is ready and the test will
+> pass unchanged once A fixes this.
+
+
 ## State management: Riverpod (chosen over Provider)
 - Compile-safe provider graph; easy `overrideWith` for **mock mode** and tests.
 - First-class `StreamProvider`/`FutureProvider` fit the **SSE risk-warning** stream,
