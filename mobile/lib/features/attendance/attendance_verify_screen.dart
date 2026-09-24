@@ -320,9 +320,11 @@ class _CountdownRing extends StatelessWidget {
         label: '확인 중',
       );
     } else {
-      // Capturing / idle: indeterminate "waiting" ring, NO number.
+      // Capturing / idle: STATIC ring (no spinner), NO number. A spinning
+      // indicator here read like an endless "loading" state; the screen is
+      // actually just waiting for QR + audio, so show a calm full ring.
       ring = AppColors.indigo;
-      indeterminate = true;
+      indeterminate = false;
       center = const _RingCenter(
         icon: Icons.qr_code_scanner,
         color: AppColors.indigo,
@@ -438,6 +440,23 @@ class _SignalChip extends StatelessWidget {
   }
 }
 
+/// Whether to offer the "다시 시도" (retry) action for the given state.
+///
+/// Retry is offered for unresolved/failed outcomes:
+///   • [VerifyPhase.error] — client/network error before a result, or
+///   • [VerifyPhase.done] with a result that is NOT [VerifyStatus.present]
+///     (i.e. pending → awaiting professor, rejected → can re-attempt).
+///
+/// A successful [VerifyStatus.present] intentionally hides retry: re-capturing
+/// after success only produces duplicate verifies (backend 409s).
+bool shouldShowRetry(AttendanceState state) {
+  if (state.phase == VerifyPhase.error) return true;
+  if (state.phase == VerifyPhase.done) {
+    return state.result?.status != VerifyStatus.present;
+  }
+  return false;
+}
+
 /// Below the ring: submit spinner, soft error text, result detail, and the
 /// amber "다시 시도" action. Failure is presented as retry, not as absence.
 class _ResultPanel extends StatelessWidget {
@@ -447,8 +466,7 @@ class _ResultPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showRetry = state.phase == VerifyPhase.done ||
-        state.phase == VerifyPhase.error;
+    final showRetry = shouldShowRetry(state);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
