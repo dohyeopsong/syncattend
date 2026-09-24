@@ -3,23 +3,38 @@ import {
   createCourse as apiCreateCourse,
   deleteCourse as apiDeleteCourse,
   enrollStudent as apiEnroll,
+  listCourseCatalog as apiListCatalog,
   listCourses as apiListCourses,
   listEnrollments as apiListEnrollments,
   updateCourse as apiUpdateCourse,
 } from "@/api/client";
 import type {
   Course,
+  CourseCatalogItem,
   CreateCourseRequest,
   Enrollment,
   UpdateCourseRequest,
 } from "@/api/types";
+
+// Client-side filter fallback for when the backend does not (yet) honor ?q=.
+function matchesQuery(c: CourseCatalogItem, q: string): boolean {
+  const needle = q.trim().toLowerCase();
+  if (!needle) return true;
+  return [c.name, c.code, c.professor_name, c.department]
+    .filter((v): v is string => !!v)
+    .some((v) => v.toLowerCase().includes(needle));
+}
 
 interface CoursesState {
   courses: Course[];
   enrollments: Record<string, Enrollment[]>; // by courseId
   loading: boolean;
   error: string | null;
+  catalog: CourseCatalogItem[]; // latest search results
+  catalogLoading: boolean;
   fetchCourses: () => Promise<void>;
+  searchCatalog: (q: string) => Promise<void>;
+  clearCatalog: () => void;
   addCourse: (payload: CreateCourseRequest) => Promise<Course | null>;
   updateCourse: (
     courseId: string,
@@ -39,6 +54,8 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
   enrollments: {},
   loading: false,
   error: null,
+  catalog: [],
+  catalogLoading: false,
 
   fetchCourses: async () => {
     set({ loading: true, error: null });
@@ -49,6 +66,26 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
       set({ loading: false, error: toMessage(e) });
     }
   },
+
+  // Debounced by the caller. Sends ?q= to the backend; if the backend returns
+  // the full catalog (q not yet honored), we filter client-side so the UX
+  // works either way. A blank query clears results.
+  searchCatalog: async (q) => {
+    if (!q.trim()) {
+      set({ catalog: [], catalogLoading: false });
+      return;
+    }
+    set({ catalogLoading: true });
+    try {
+      const items = await apiListCatalog(q);
+      const filtered = items.filter((c) => matchesQuery(c, q));
+      set({ catalog: filtered, catalogLoading: false });
+    } catch (e) {
+      set({ catalogLoading: false, error: toMessage(e) });
+    }
+  },
+
+  clearCatalog: () => set({ catalog: [] }),
 
   addCourse: async (payload) => {
     set({ error: null });

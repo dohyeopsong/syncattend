@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 import { useCoursesStore } from "@/store/courses";
 import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
@@ -14,11 +20,12 @@ import {
 } from "@/components/ui/card";
 import type {
   Course,
+  CourseCatalogItem,
   CreateCourseRequest,
   DayOfWeek,
   UpdateCourseRequest,
 } from "@/api/types";
-import { BookOpen, Pencil, Play, Plus, Trash2, X } from "lucide-react";
+import { BookOpen, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
 
 // day_of_week: 0=Mon … 6=Sun (per contract).
 const DAY_LABELS: Record<DayOfWeek, string> = {
@@ -32,6 +39,41 @@ const DAY_LABELS: Record<DayOfWeek, string> = {
 };
 
 const DAY_OPTIONS: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];
+
+// Period rule: 1..12교시, each 60 min, 1교시 starts 09:00.
+// N교시 start hour = 8 + N (1교시 → 09:00 … 12교시 → 20:00).
+const PERIOD_OPTIONS = Array.from({ length: 12 }, (_, i) => i + 1);
+
+function periodStartHour(period: number): number {
+  return 8 + period;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// "3교시 (11:00~12:00)"
+function periodLabel(period: number): string {
+  const start = periodStartHour(period);
+  return `${period}교시 (${pad2(start)}:00~${pad2(start + 1)}:00)`;
+}
+
+// "09:00~12:00" spanning start..end periods (inclusive).
+function periodRangeTime(start: number, end: number): string {
+  const s = periodStartHour(start);
+  const e = periodStartHour(end) + 1;
+  return `${pad2(s)}:00~${pad2(e)}:00`;
+}
+
+// Small debounce hook — returns the value after it has been stable for `ms`.
+function useDebounced<T>(value: T, ms: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
 
 // Editable schedule fields shared by the add + edit forms (all strings for
 // controlled inputs; converted to typed payload on submit).
@@ -89,6 +131,30 @@ function formToPayload(f: CourseForm): CreateCourseRequest {
     location: str(f.location),
     credits: num(f.credits),
   };
+}
+
+// Fill the add form from a selected catalog item (day/period stay editable).
+function catalogItemToForm(item: CourseCatalogItem): CourseForm {
+  return {
+    name: item.name ?? "",
+    code: item.code ?? "",
+    department: item.department ?? "",
+    professor_name: item.professor_name ?? "",
+    day_of_week: item.day_of_week != null ? String(item.day_of_week) : "",
+    start_period: item.start_period != null ? String(item.start_period) : "",
+    end_period: item.end_period != null ? String(item.end_period) : "",
+    location: item.location ?? "",
+    credits: item.credits != null ? String(item.credits) : "",
+  };
+}
+
+// Front-end validation: if both periods set, start must be <= end.
+function periodError(f: CourseForm): string | null {
+  const s = f.start_period.trim();
+  const e = f.end_period.trim();
+  if (s === "" || e === "") return null;
+  if (Number(s) > Number(e)) return "시작 교시는 종료 교시보다 앞서야 합니다.";
+  return null;
 }
 
 function scheduleLabel(c: Course): string {
@@ -177,28 +243,47 @@ function CourseFields({
         <label className="text-xs font-medium text-muted-foreground">
           시작 교시
         </label>
-        <Input
-          type="number"
-          min={1}
-          max={15}
-          placeholder="1"
+        <select
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           value={form.start_period}
           onChange={(e) => upd({ start_period: e.target.value })}
-        />
+        >
+          <option value="">미지정</option>
+          {PERIOD_OPTIONS.map((p) => (
+            <option key={p} value={p}>
+              {periodLabel(p)}
+            </option>
+          ))}
+        </select>
       </div>
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">
           종료 교시
         </label>
-        <Input
-          type="number"
-          min={1}
-          max={15}
-          placeholder="3"
+        <select
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           value={form.end_period}
           onChange={(e) => upd({ end_period: e.target.value })}
-        />
+        >
+          <option value="">미지정</option>
+          {PERIOD_OPTIONS.map((p) => (
+            <option key={p} value={p}>
+              {periodLabel(p)}
+            </option>
+          ))}
+        </select>
       </div>
+      {form.start_period && form.end_period && !periodError(form) && (
+        <p className="col-span-2 text-[11px] text-muted-foreground">
+          수업 시간:{" "}
+          {periodRangeTime(Number(form.start_period), Number(form.end_period))}
+        </p>
+      )}
+      {periodError(form) && (
+        <p className="col-span-2 text-[11px] text-destructive">
+          {periodError(form)}
+        </p>
+      )}
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">
           강의실
@@ -222,6 +307,112 @@ function CourseFields({
           onChange={(e) => upd({ credits: e.target.value })}
         />
       </div>
+    </div>
+  );
+}
+
+// Debounced catalog-search combobox. Typing a course or professor name queries
+// GET /courses/catalog?q= and shows candidates; selecting one auto-fills the
+// add form. No results → the manual "직접 입력" fields below stay usable.
+function CatalogSearch({
+  onSelect,
+}: {
+  onSelect: (item: CourseCatalogItem) => void;
+}) {
+  const catalog = useCoursesStore((s) => s.catalog);
+  const catalogLoading = useCoursesStore((s) => s.catalogLoading);
+  const searchCatalog = useCoursesStore((s) => s.searchCatalog);
+  const clearCatalog = useCoursesStore((s) => s.clearCatalog);
+
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const debounced = useDebounced(query, 300);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    void searchCatalog(debounced);
+  }, [debounced, searchCatalog]);
+
+  // Close on outside click.
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  const showDropdown = open && query.trim().length > 0;
+  const noResults = !catalogLoading && debounced.trim().length > 0 && catalog.length === 0;
+
+  return (
+    <div className="relative space-y-1" ref={boxRef}>
+      <label className="text-xs font-medium text-muted-foreground">
+        강좌·교수 검색 (자동완성)
+      </label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          className="pl-8"
+          placeholder="과목명 또는 교수명 입력…"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          role="combobox"
+          aria-expanded={showDropdown}
+          aria-controls="catalog-listbox"
+          autoComplete="off"
+        />
+      </div>
+
+      {showDropdown && (
+        <ul
+          id="catalog-listbox"
+          role="listbox"
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-background shadow-md"
+        >
+          {catalogLoading && (
+            <li className="px-3 py-2 text-sm text-muted-foreground">
+              검색 중…
+            </li>
+          )}
+          {noResults && (
+            <li className="px-3 py-2 text-sm text-muted-foreground">
+              검색 결과가 없습니다. 아래에서 직접 입력하세요.
+            </li>
+          )}
+          {catalog.map((item) => (
+            <li key={item.id} role="option" aria-selected={false}>
+              <button
+                type="button"
+                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent"
+                onClick={() => {
+                  onSelect(item);
+                  setQuery("");
+                  setOpen(false);
+                  clearCatalog();
+                }}
+              >
+                <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                  {item.name}
+                  {item.code && (
+                    <Badge variant="outline">{item.code}</Badge>
+                  )}
+                </span>
+                <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                  {item.professor_name && <span>{item.professor_name}</span>}
+                  {item.department && <span>{item.department}</span>}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -265,6 +456,7 @@ export function CoursePanel() {
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     if (!addForm.name.trim()) return;
+    if (periodError(addForm)) return; // start<=end guard
     setBusy(true);
     const c = await addCourse(formToPayload(addForm));
     setBusy(false);
@@ -283,6 +475,7 @@ export function CoursePanel() {
   async function onSaveEdit(e: FormEvent) {
     e.preventDefault();
     if (!editingId || !editForm.name.trim()) return;
+    if (periodError(editForm)) return; // start<=end guard
     setBusy(true);
     const payload: UpdateCourseRequest = formToPayload(editForm);
     const updated = await updateCourse(editingId, payload);
@@ -373,7 +566,11 @@ export function CoursePanel() {
                         <Button
                           type="submit"
                           size="sm"
-                          disabled={busy || !editForm.name.trim()}
+                          disabled={
+                            busy ||
+                            !editForm.name.trim() ||
+                            !!periodError(editForm)
+                          }
                         >
                           저장
                         </Button>
@@ -442,12 +639,28 @@ export function CoursePanel() {
             className="space-y-3 rounded-md border border-dashed p-3"
           >
             <p className="text-sm font-medium">새 강좌 추가</p>
+            {/* Autocomplete: pick from the catalog to auto-fill, then adjust
+                요일/교시. If no match, fill the fields below manually. */}
+            <CatalogSearch
+              onSelect={(item) =>
+                setAddForm((prev) => ({
+                  ...catalogItemToForm(item),
+                  // keep whatever the professor may have already set for day/period
+                  day_of_week: prev.day_of_week || (item.day_of_week != null ? String(item.day_of_week) : ""),
+                  start_period: prev.start_period || (item.start_period != null ? String(item.start_period) : ""),
+                  end_period: prev.end_period || (item.end_period != null ? String(item.end_period) : ""),
+                }))
+              }
+            />
+            <p className="text-[11px] text-muted-foreground">
+              검색 결과가 없으면 아래에서 직접 입력하세요.
+            </p>
             <CourseFields form={addForm} setForm={setAddForm} />
             <div className="flex justify-end">
               <Button
                 type="submit"
                 variant="outline"
-                disabled={busy || !addForm.name.trim()}
+                disabled={busy || !addForm.name.trim() || !!periodError(addForm)}
               >
                 <Plus className="h-4 w-4" /> 추가
               </Button>

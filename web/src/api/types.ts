@@ -49,6 +49,23 @@ export interface CreateCourseRequest {
 // PATCH — every field optional (partial update). Mirrors UpdateCourseRequest.
 export type UpdateCourseRequest = Partial<CreateCourseRequest>;
 
+// A browsable catalog entry (GET /courses/catalog). Same schedule shape as
+// Course, plus `enrolled` for the calling user. Owner A's contract.
+export interface CourseCatalogItem {
+  id: string;
+  professor_id: string;
+  name: string;
+  code: string | null;
+  department: string | null;
+  professor_name: string | null;
+  day_of_week: DayOfWeek | null;
+  start_period: number | null;
+  end_period: number | null;
+  location: string | null;
+  credits: number | null;
+  enrolled?: boolean;
+}
+
 export interface Enrollment {
   course_id: string;
   student_id: string;

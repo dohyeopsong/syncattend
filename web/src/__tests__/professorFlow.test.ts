@@ -16,7 +16,10 @@ import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
 
 // ---- contract-shaped in-memory backend ----
-type Handler = (body: any) => { status: number; json: any };
+type Handler = (
+  body: any,
+  query?: Record<string, string>,
+) => { status: number; json: any };
 
 function makeBackend() {
   const state = {
@@ -89,6 +92,48 @@ function makeBackend() {
       },
     }),
     "DELETE /courses/course-1": () => ({ status: 204, json: null }),
+    "GET /courses/catalog": (_b, query) => {
+      const all = [
+        {
+          id: "cat-1",
+          professor_id: "prof-9",
+          name: "운영체제",
+          code: "SW3010",
+          department: "소프트웨어학과",
+          professor_name: "이영희",
+          day_of_week: 2,
+          start_period: 3,
+          end_period: 4,
+          location: "공학관 210",
+          credits: 3,
+          enrolled: false,
+        },
+        {
+          id: "cat-2",
+          professor_id: "prof-8",
+          name: "컴퓨터네트워크",
+          code: "SW3020",
+          department: "소프트웨어학과",
+          professor_name: "박철수",
+          day_of_week: 4,
+          start_period: 5,
+          end_period: 6,
+          location: "공학관 220",
+          credits: 3,
+          enrolled: false,
+        },
+      ];
+      const q = (query?.q ?? "").toLowerCase();
+      const json = q
+        ? all.filter(
+            (c) =>
+              c.name.toLowerCase().includes(q) ||
+              c.professor_name.toLowerCase().includes(q) ||
+              (c.code ?? "").toLowerCase().includes(q),
+          )
+        : all;
+      return { status: 200, json };
+    },
     "POST /courses/course-1/enrollments": (b) => ({
       status: 201,
       json: { course_id: "course-1", student_id: b.student_id },
@@ -185,7 +230,9 @@ function makeBackend() {
 function installFetch(backend: ReturnType<typeof makeBackend>) {
   const fn = vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? "GET").toUpperCase();
-    const path = url.replace(/^\/api/, "");
+    const full = url.replace(/^\/api/, "");
+    const [path, queryString = ""] = full.split("?");
+    const query = Object.fromEntries(new URLSearchParams(queryString));
     const key = `${method} ${path}`;
     const handler = backend.routes[key];
     if (!handler) {
@@ -195,7 +242,7 @@ function installFetch(backend: ReturnType<typeof makeBackend>) {
       });
     }
     const body = init?.body ? JSON.parse(init.body as string) : {};
-    const { status, json } = handler(body);
+    const { status, json } = handler(body, query);
     if (status === 204) {
       return new Response(null, { status: 204 });
     }
@@ -223,7 +270,13 @@ beforeEach(() => {
   useAuthStore.getState().logout();
   useSessionStore.getState().reset();
   useAttendanceStore.getState().reset();
-  useCoursesStore.setState({ courses: [], enrollments: {}, error: null });
+  useCoursesStore.setState({
+    courses: [],
+    enrollments: {},
+    error: null,
+    catalog: [],
+    catalogLoading: false,
+  });
   api.setAccessToken(null);
 });
 
@@ -389,5 +442,64 @@ describe("course management CRUD (web client + store)", () => {
     expect(ok).toBe(false);
     expect(useCoursesStore.getState().error).toBeTruthy();
     expect(useCoursesStore.getState().courses).toHaveLength(1);
+  });
+});
+
+describe("catalog autocomplete search (web client + store)", () => {
+  it("searchCatalog(q) returns matching candidates with schedule fields", async () => {
+    installFetch(makeBackend());
+    await useCoursesStore.getState().searchCatalog("운영");
+    const catalog = useCoursesStore.getState().catalog;
+    expect(catalog).toHaveLength(1);
+    const hit = catalog[0];
+    expect(hit.name).toBe("운영체제");
+    // schedule fields present → the combobox can auto-fill the add form
+    expect(hit.code).toBe("SW3010");
+    expect(hit.professor_name).toBe("이영희");
+    expect(hit.department).toBe("소프트웨어학과");
+    expect(hit.day_of_week).toBe(2);
+    expect(hit.start_period).toBe(3);
+    expect(hit.end_period).toBe(4);
+    expect(hit.credits).toBe(3);
+  });
+
+  it("matches by professor name too", async () => {
+    installFetch(makeBackend());
+    await useCoursesStore.getState().searchCatalog("박철수");
+    const catalog = useCoursesStore.getState().catalog;
+    expect(catalog).toHaveLength(1);
+    expect(catalog[0].name).toBe("컴퓨터네트워크");
+  });
+
+  it("blank query clears results without a request", async () => {
+    const fetchFn = installFetch(makeBackend());
+    await useCoursesStore.getState().searchCatalog("   ");
+    expect(useCoursesStore.getState().catalog).toHaveLength(0);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it("selecting a candidate produces a create payload that round-trips", async () => {
+    // Simulates the combobox → auto-fill → createCourse path end-to-end.
+    installFetch(makeBackend());
+    await useCoursesStore.getState().searchCatalog("네트워크");
+    const item = useCoursesStore.getState().catalog[0];
+    expect(item.name).toBe("컴퓨터네트워크");
+    // auto-fill maps catalog item → CreateCourseRequest (professor adjusts day/period)
+    const created = await useCoursesStore.getState().addCourse({
+      name: item.name,
+      code: item.code,
+      department: item.department,
+      professor_name: item.professor_name,
+      day_of_week: item.day_of_week,
+      start_period: item.start_period,
+      end_period: item.end_period,
+      location: item.location,
+      credits: item.credits,
+    });
+    // POST /courses mock echoes payload → fields preserved through the client
+    expect(created?.code).toBe("SW3020");
+    expect(created?.professor_name).toBe("박철수");
+    expect(created?.start_period).toBe(5);
+    expect(created?.end_period).toBe(6);
   });
 });

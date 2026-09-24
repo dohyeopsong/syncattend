@@ -7,6 +7,7 @@ import type {
   AttendanceRecord,
   AttendanceStatus,
   Course,
+  CourseCatalogItem,
   CreateCourseRequest,
   Enrollment,
   LoginRequest,
@@ -90,6 +91,14 @@ export function createCourse(payload: CreateCourseRequest): Promise<Course> {
 
 export function listCourses(): Promise<Course[]> {
   return request<Course[]>("/courses");
+}
+
+// GET /courses/catalog?q= — browsable catalog for autocomplete. The `q` search
+// param is additive; if the backend does not yet filter, callers filter
+// client-side. Encodes q only when non-empty to keep the URL clean.
+export function listCourseCatalog(q?: string): Promise<CourseCatalogItem[]> {
+  const query = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  return request<CourseCatalogItem[]>(`/courses/catalog${query}`);
 }
 
 // PATCH /courses/{course_id} — partial update of schedule/metadata fields.
