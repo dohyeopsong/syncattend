@@ -24,7 +24,7 @@ dependencies:
 
   # --- Attendance layered defense
   mobile_scanner: ^5.2.3          # dynamic QR scan
-  record: ^5.1.2                  # microphone PCM stream capture
+  record: ^7.1.1                 # microphone PCM stream capture
   fftea: ^1.5.0+1                 # FFT for 18-20kHz audio nonce decode
 
   # --- Permissions (mic + camera) with denial fallback
