@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/card";
 import type { AttendanceStatus } from "@/api/types";
 import { statusMeta, deriveAttendanceStats } from "@/lib/status";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
 import { CheckCircle2, XCircle, Clock, RefreshCw, ClipboardCheck } from "lucide-react";
 
 // Screen (b): Opt-out absentee-centric table. Under Opt-out, verified students
@@ -42,6 +44,20 @@ export function AttendanceTable() {
           </CardTitle>
           <CardDescription>세션을 열면 출결 집계가 표시됩니다.</CardDescription>
         </CardHeader>
+        <CardContent>
+          {!session ? (
+            <EmptyState
+              Icon={ClipboardCheck}
+              title="검토할 세션이 없습니다"
+              description="강좌를 선택하고 세션을 열면 인증 미통과(미인증) 학생 명단이 여기에 표시됩니다."
+            />
+          ) : (
+            <div className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          )}
+        </CardContent>
       </Card>
     );
   }

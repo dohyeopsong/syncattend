@@ -9,6 +9,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { EmptyState } from "@/components/ui/empty-state";
+import { StatNumber } from "@/components/ui/stat-number";
 import { Activity, AlertTriangle, Wifi, WifiOff } from "lucide-react";
 import { deriveAttendanceStats } from "@/lib/status";
 
@@ -74,43 +77,76 @@ export function RealtimeRiskPanel() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div
-          className={
-            "flex items-start gap-2 rounded-lg border p-3 text-sm " +
-            (risk.level === "danger"
-              ? "border-destructive/40 bg-destructive/10 text-destructive"
-              : risk.level === "warning"
-                ? "border-warning/40 bg-warning/10 text-warning"
-                : "border-success/30 bg-success/10 text-success")
-          }
-        >
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            <span className="font-semibold">
-              {risk.level === "danger"
-                ? "위험 · "
-                : risk.level === "warning"
-                  ? "주의 · "
-                  : "정상 · "}
-            </span>
-            {risk.message}
-          </span>
-        </div>
+        {!session ? (
+          <EmptyState
+            Icon={Activity}
+            title="실시간 모니터링 대기 중"
+            description="강좌를 선택하고 세션을 열면 서버가 밀어주는 실시간 출결 집계가 여기에 표시됩니다."
+          />
+        ) : !aggregate ? (
+          // Session open, first aggregate not in yet → skeletons (no jump).
+          <>
+            <Skeleton className="h-12 w-full" />
+            <div className="grid grid-cols-3 gap-3">
+              {[0, 1, 2].map((i) => (
+                <div key={i} className="rounded-lg border p-3">
+                  <Skeleton className="mx-auto h-6 w-10" />
+                  <Skeleton className="mx-auto mt-2 h-3 w-12" />
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div
+              className={
+                "flex items-start gap-2 rounded-lg border p-3 text-sm " +
+                (risk.level === "danger"
+                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  : risk.level === "warning"
+                    ? "border-warning/40 bg-warning/10 text-warning"
+                    : "border-success/30 bg-success/10 text-success")
+              }
+            >
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                <span className="font-semibold">
+                  {risk.level === "danger"
+                    ? "위험 · "
+                    : risk.level === "warning"
+                      ? "주의 · "
+                      : "정상 · "}
+                </span>
+                {risk.message}
+              </span>
+            </div>
 
-        <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="rounded-lg border p-3">
-            <div className="text-xl font-bold">{total}</div>
-            <div className="text-xs text-muted-foreground">전체</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xl font-bold text-success">{present}</div>
-            <div className="text-xs text-muted-foreground">실시간 출석</div>
-          </div>
-          <div className="rounded-lg border p-3">
-            <div className="text-xl font-bold text-warning">{unverified}</div>
-            <div className="text-xs text-muted-foreground">미인증</div>
-          </div>
-        </div>
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <div className="rounded-lg border p-4">
+                <div className="text-2xl font-semibold leading-none">
+                  <StatNumber value={total} />
+                </div>
+                <div className="mt-1.5 text-xs text-muted-foreground">전체</div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-2xl font-semibold leading-none text-success">
+                  <StatNumber value={present} />
+                </div>
+                <div className="mt-1.5 text-xs text-muted-foreground">
+                  실시간 출석
+                </div>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="text-2xl font-semibold leading-none text-warning">
+                  <StatNumber value={unverified} />
+                </div>
+                <div className="mt-1.5 text-xs text-muted-foreground">
+                  미인증
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </CardContent>
     </Card>
   );

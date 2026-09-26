@@ -42,3 +42,69 @@
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 }
+
+/* ------------------------------------------------------------------ motion
+   Display-only animations for the dashboard. Every animated utility is gated
+   behind `prefers-reduced-motion: no-preference`, so users who ask for reduced
+   motion get a calm static UI (no shimmer, no pulse, no spin). Meaning is never
+   carried by motion alone — these are purely decorative/affordance hints. */
+@layer utilities {
+  /* Skeleton placeholder: a soft left-to-right shimmer over a neutral block. */
+  .skeleton {
+    background-color: hsl(var(--muted));
+    border-radius: calc(var(--radius) - 2px);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .skeleton {
+      background-image: linear-gradient(
+        90deg,
+        hsl(var(--muted)) 0%,
+        hsl(210 40% 94%) 50%,
+        hsl(var(--muted)) 100%
+      );
+      background-size: 200% 100%;
+      animation: skeleton-shimmer 1.4s ease-in-out infinite;
+    }
+
+    /* Gentle opacity breathing — used by the ultrasonic "송출 중" badge. */
+    .animate-soft-pulse {
+      animation: soft-pulse 1.8s ease-in-out infinite;
+    }
+
+    /* Live-count nudge: a brief fade/rise when a number changes. */
+    .animate-count-in {
+      animation: count-in 260ms ease-out;
+    }
+  }
+
+  @keyframes skeleton-shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  @keyframes soft-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+
+  @keyframes count-in {
+    0% {
+      opacity: 0.35;
+      transform: translateY(2px);
+    }
+    100% {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}

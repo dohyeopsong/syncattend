@@ -11,6 +11,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Radio, Timer, QrCode, Volume2, Play, Square } from "lucide-react";
+import { CountdownRing } from "@/components/ui/countdown-ring";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   UltrasonicEmitter,
   DEFAULT_PROTOCOL,
@@ -41,6 +43,30 @@ export function SessionTokenPanel() {
   const [emitting, setEmitting] = useState(false);
   const [gain, setGain] = useState(0.6);
   const [audioError, setAudioError] = useState<string | null>(null);
+
+  // ---- DISPLAY-ONLY token TTL countdown -----------------------------------
+  // The store owns polling + rotation; this is a purely visual per-second
+  // countdown so the 15s rotation is *seen*. It reads token.expires_in and the
+  // rotating token value, then ticks a local number down to 0. It never calls
+  // a store action, never triggers a refresh, and never affects rotation.
+  const rotationTtl = token?.expires_in ?? 0;
+  const rotationKey = token?.qr_token ?? token?.audio_nonce ?? "";
+  const [ttlRemaining, setTtlRemaining] = useState(rotationTtl);
+
+  // Reset the visual countdown whenever the token rotates or a poll refreshes
+  // expires_in (rotationKey / rotationTtl change).
+  useEffect(() => {
+    setTtlRemaining(rotationTtl);
+  }, [rotationKey, rotationTtl]);
+
+  // Local 1s tick, floored at 0. Display only; stops when inactive.
+  useEffect(() => {
+    if (!active || !token) return;
+    const id = setInterval(() => {
+      setTtlRemaining((s) => (s > 0 ? s - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [active, token]);
 
   useEffect(() => {
     if (active) startTokenPolling(5000);
@@ -113,6 +139,13 @@ export function SessionTokenPanel() {
             강좌를 선택하고 세션을 열면 QR·음향 토큰이 여기에 표시됩니다.
           </CardDescription>
         </CardHeader>
+        <CardContent>
+          <EmptyState
+            Icon={QrCode}
+            title="송출할 세션이 없습니다"
+            description="강좌를 선택하고 세션을 열면 회전 QR과 초음파 음향 토큰이 여기에서 송출됩니다."
+          />
+        </CardContent>
       </Card>
     );
   }
@@ -160,13 +193,29 @@ export function SessionTokenPanel() {
                   {token.audio_nonce}
                 </code>
               </div>
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Radio className="h-4 w-4" /> TTL {token.expires_in}s · 회전 중
-                {emitting && (
-                  <Badge variant="success" className="ml-1">
-                    ♪ 초음파 송출 중
-                  </Badge>
-                )}
+              {/* Token TTL rotation, visualized (display only). */}
+              <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
+                <CountdownRing
+                  remaining={ttlRemaining}
+                  total={token.expires_in || 15}
+                />
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    <Radio className="h-4 w-4 text-primary" /> 회전 QR·음향 토큰
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {token.expires_in || 15}초마다 자동 회전(단일 사용). 남은
+                    시간이 0이 되면 새 토큰으로 교체됩니다.
+                  </p>
+                  {emitting && (
+                    <Badge
+                      variant="success"
+                      className="gap-1 animate-soft-pulse motion-reduce:animate-none"
+                    >
+                      <Volume2 className="h-3 w-3" /> ♪ 초음파 송출 중
+                    </Badge>
+                  )}
+                </div>
               </div>
             </div>
           )}
