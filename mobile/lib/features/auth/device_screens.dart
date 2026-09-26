@@ -1,7 +1,61 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/design.dart';
 import 'auth_controller.dart';
+
+/// Circular indigo-subtle badge used to anchor each onboarding screen.
+class _IconBadge extends StatelessWidget {
+  const _IconBadge(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 72,
+      height: 72,
+      decoration: const BoxDecoration(
+        color: AppColors.indigoSubtle,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(icon, size: 36, color: AppColors.indigo),
+    );
+  }
+}
+
+/// Shared inline error surface: danger token + icon (never color-only).
+class _ErrorNotice extends StatelessWidget {
+  const _ErrorNotice({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.danger.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline, color: AppColors.danger, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(color: AppColors.danger, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 /// Shown while the app-generated UUID is being bound to the account.
 class DeviceRegistrationScreen extends ConsumerWidget {
@@ -11,34 +65,66 @@ class DeviceRegistrationScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authControllerProvider);
     return Scaffold(
+      backgroundColor: AppColors.mutedBg,
       appBar: AppBar(title: const Text('기기 등록')),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.smartphone, size: 64),
-              const SizedBox(height: 16),
-              const Text(
-                '이 기기를 계정에 등록합니다.\n앱이 생성한 고유 UUID가 안전 저장소'
-                '(키체인/키스토어)에 보관되어 출석 인증에 사용됩니다.',
-                textAlign: TextAlign.center,
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const _IconBadge(Icons.smartphone),
+                  const SizedBox(height: 24),
+                  const Text(
+                    '이 기기를 계정에 등록합니다',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.foreground,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '앱이 생성한 고유 UUID가 안전 저장소(키체인/키스토어)에 '
+                    '보관되어 출석 인증에 사용됩니다.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.5,
+                      color: AppColors.mutedForeground,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  if (auth.error != null) ...[
+                    _ErrorNotice(message: auth.error!),
+                    const SizedBox(height: 16),
+                  ],
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: auth.busy
+                          ? null
+                          : () => ref
+                              .read(authControllerProvider.notifier)
+                              .registerDevice(),
+                      child: auth.busy
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('기기 등록 다시 시도'),
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 24),
-              if (auth.busy) const CircularProgressIndicator(),
-              if (auth.error != null)
-                Text(auth.error!,
-                    style: const TextStyle(color: Colors.red)),
-              const SizedBox(height: 16),
-              if (!auth.busy)
-                FilledButton(
-                  onPressed: () => ref
-                      .read(authControllerProvider.notifier)
-                      .registerDevice(),
-                  child: const Text('기기 등록 다시 시도'),
-                ),
-            ],
+            ),
           ),
         ),
       ),
@@ -76,7 +162,7 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
     messenger.showSnackBar(
       SnackBar(
         content: Text(msg),
-        backgroundColor: error ? Colors.red.shade700 : null,
+        backgroundColor: error ? AppColors.danger : null,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -127,6 +213,7 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
     }
 
     return Scaffold(
+      backgroundColor: AppColors.mutedBg,
       appBar: AppBar(
         title: const Text('기기 변경 재인증'),
         leading: IconButton(
@@ -141,85 +228,97 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              '다른 기기(또는 새 UUID)가 감지되었습니다. 학교 이메일'
-              '(@wku.ac.kr)로 인증 후 이 기기로 재바인딩합니다.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _email,
-              keyboardType: TextInputType.emailAddress,
-              autocorrect: false,
-              enableSuggestions: false,
-              textInputAction: TextInputAction.next,
-              decoration: const InputDecoration(
-                labelText: '학교 이메일 (@wku.ac.kr)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 12),
-            if (_codeSent)
-              TextField(
-                controller: _code,
-                keyboardType: TextInputType.number,
-                textInputAction: TextInputAction.done,
-                onSubmitted: (_) => auth.busy ? null : _confirmCode(),
-                decoration: const InputDecoration(
-                  labelText: '인증 코드',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            if (auth.error != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.shade200),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, color: Colors.red.shade700),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        auth.error!,
-                        style: TextStyle(color: Colors.red.shade900),
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Center(child: _IconBadge(Icons.phonelink_setup)),
+                  const SizedBox(height: 24),
+                  const Text(
+                    '기기 변경이 감지되었습니다',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.foreground,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    '다른 기기(또는 새 UUID)가 감지되었습니다. 학교 이메일'
+                    '(@wku.ac.kr)로 인증 후 이 기기로 재바인딩합니다.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.5,
+                      color: AppColors.mutedForeground,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  TextField(
+                    controller: _email,
+                    keyboardType: TextInputType.emailAddress,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    textInputAction: TextInputAction.next,
+                    decoration: const InputDecoration(
+                      labelText: '학교 이메일 (@wku.ac.kr)',
+                      prefixIcon: Icon(Icons.mail_outline),
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (_codeSent) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _code,
+                      keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => auth.busy ? null : _confirmCode(),
+                      decoration: const InputDecoration(
+                        labelText: '인증 코드',
+                        prefixIcon: Icon(Icons.pin_outlined),
+                        border: OutlineInputBorder(),
                       ),
                     ),
                   ],
-                ),
+                  if (auth.error != null) ...[
+                    const SizedBox(height: 12),
+                    _ErrorNotice(message: auth.error!),
+                  ],
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 48,
+                    child: FilledButton(
+                      onPressed: auth.busy
+                          ? null
+                          : (_codeSent ? _confirmCode : _requestCode),
+                      child: auth.busy
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child:
+                                  CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Text(_codeSent ? '코드 확인 & 재바인딩' : '인증 코드 받기'),
+                    ),
+                  ),
+                  if (_codeSent) ...[
+                    const SizedBox(height: 8),
+                    TextButton(
+                      onPressed: auth.busy ? null : _requestCode,
+                      child: const Text('코드 다시 받기'),
+                    ),
+                  ],
+                ],
               ),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(
-              onPressed: auth.busy
-                  ? null
-                  : (_codeSent ? _confirmCode : _requestCode),
-              child: auth.busy
-                  ? const SizedBox(
-                      height: 18,
-                      width: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(_codeSent ? '코드 확인 & 재바인딩' : '인증 코드 받기'),
             ),
-            if (_codeSent) ...[
-              const SizedBox(height: 8),
-              TextButton(
-                onPressed: auth.busy ? null : _requestCode,
-                child: const Text('코드 다시 받기'),
-              ),
-            ],
-          ],
+          ),
         ),
       ),
     );
