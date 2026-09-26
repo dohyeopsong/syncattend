@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -33,6 +34,26 @@ import 'permissions_service.dart';
 ///   Do NOT emit from here or edit web/ — that is owner C's surface.
 class AudioLoopbackHarnessScreen extends ConsumerStatefulWidget {
   const AudioLoopbackHarnessScreen({super.key});
+
+  /// Whether the dev harness may be surfaced. It is a developer-only tool, so
+  /// it is gated OFF in release builds. Debug/profile builds keep it available.
+  /// A release build can still opt in explicitly with:
+  ///   flutter build ... --dart-define=ENABLE_AUDIO_HARNESS=true
+  static const bool isAvailable = !kReleaseMode ||
+      bool.fromEnvironment('ENABLE_AUDIO_HARNESS', defaultValue: false);
+
+  /// Guarded navigation entry point. In release builds (where [isAvailable] is
+  /// false) this is a no-op, so the harness can never be pushed onto the
+  /// navigator; in debug/profile it pushes the screen as usual. Prefer this
+  /// over constructing/pushing the screen directly from UI code.
+  static Future<void> open(BuildContext context) {
+    if (!isAvailable) return Future<void>.value();
+    return Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const AudioLoopbackHarnessScreen(),
+      ),
+    );
+  }
 
   @override
   ConsumerState<AudioLoopbackHarnessScreen> createState() =>
@@ -107,6 +128,14 @@ class _AudioLoopbackHarnessScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Defense in depth: even if this screen is constructed directly (bypassing
+    // [AudioLoopbackHarnessScreen.open]) in a release build, do not expose the
+    // live-mic dev harness — render an inert placeholder instead.
+    if (!AudioLoopbackHarnessScreen.isAvailable) {
+      return const Scaffold(
+        body: Center(child: Text('Not available in release builds.')),
+      );
+    }
     final scoring = _expected.text.trim().isNotEmpty;
     return Scaffold(
       appBar: AppBar(title: const Text('음향 복호 실측 하니스 (TR-0)')),

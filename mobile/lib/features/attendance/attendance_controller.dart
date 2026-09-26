@@ -10,6 +10,18 @@ import 'audio_capture_service.dart';
 /// UI phase for the attendance verification screen.
 enum VerifyPhase { idle, capturing, submitting, done, error }
 
+/// Sentinel for [AttendanceState.copyWith] so every nullable field can be
+/// treated the same way: omit the argument to keep the current value, or pass
+/// `null` explicitly to clear it. Using a private sentinel (instead of a mix of
+/// `field ?? this.field` and one-off `clearXxx` bool flags) removes the old
+/// asymmetry where `error` could be cleared but `qrToken`/`audioNonce`/
+/// `sessionId`/`result` could not.
+const Object _unset = _Unset();
+
+class _Unset {
+  const _Unset();
+}
+
 class AttendanceState {
   const AttendanceState({
     this.phase = VerifyPhase.idle,
@@ -33,24 +45,32 @@ class AttendanceState {
   bool get hasAudio => audioNonce != null && audioNonce!.isNotEmpty;
   bool get bothCaptured => hasQr && hasAudio;
 
+  /// Returns a copy with the given overrides. Every nullable field follows the
+  /// same rule via the [_unset] sentinel: omit the argument to preserve the
+  /// current value, or pass `null` explicitly to clear it. Non-nullable fields
+  /// ([phase], [secondsRemaining]) keep the usual `?? this.x` form.
   AttendanceState copyWith({
     VerifyPhase? phase,
-    String? qrToken,
-    String? audioNonce,
-    String? sessionId,
     int? secondsRemaining,
-    VerifyResult? result,
-    String? error,
-    bool clearError = false,
+    Object? qrToken = _unset,
+    Object? audioNonce = _unset,
+    Object? sessionId = _unset,
+    Object? result = _unset,
+    Object? error = _unset,
   }) =>
       AttendanceState(
         phase: phase ?? this.phase,
-        qrToken: qrToken ?? this.qrToken,
-        audioNonce: audioNonce ?? this.audioNonce,
-        sessionId: sessionId ?? this.sessionId,
         secondsRemaining: secondsRemaining ?? this.secondsRemaining,
-        result: result ?? this.result,
-        error: clearError ? null : (error ?? this.error),
+        qrToken: identical(qrToken, _unset) ? this.qrToken : qrToken as String?,
+        audioNonce: identical(audioNonce, _unset)
+            ? this.audioNonce
+            : audioNonce as String?,
+        sessionId:
+            identical(sessionId, _unset) ? this.sessionId : sessionId as String?,
+        result: identical(result, _unset)
+            ? this.result
+            : result as VerifyResult?,
+        error: identical(error, _unset) ? this.error : error as String?,
       );
 }
 
@@ -134,7 +154,7 @@ class AttendanceController extends StateNotifier<AttendanceState> {
     _countdown?.cancel();
     await _audio.stop();
     await _audioSub?.cancel();
-    state = state.copyWith(phase: VerifyPhase.submitting, clearError: true);
+    state = state.copyWith(phase: VerifyPhase.submitting, error: null);
     try {
       final api = _ref.read(apiClientProvider);
       final uuid = await _ref.read(deviceIdentityProvider).getOrCreate();
