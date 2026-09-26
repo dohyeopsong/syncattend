@@ -66,7 +66,7 @@ function periodRangeTime(start: number, end: number): string {
 }
 
 // Small debounce hook — returns the value after it has been stable for `ms`.
-function useDebounced<T>(value: T, ms: number): T {
+export function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(value), ms);
@@ -88,6 +88,8 @@ interface CourseForm {
   location: string;
   credits: string;
 }
+
+export type { CourseForm };
 
 const EMPTY_FORM: CourseForm = {
   name: "",
@@ -116,7 +118,7 @@ function courseToForm(c: Course): CourseForm {
 }
 
 // Empty string → null; numeric strings → number. Keeps optional fields sparse.
-function formToPayload(f: CourseForm): CreateCourseRequest {
+export function formToPayload(f: CourseForm): CreateCourseRequest {
   const str = (v: string) => (v.trim() === "" ? null : v.trim());
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
   const day = f.day_of_week.trim() === "" ? null : (Number(f.day_of_week) as DayOfWeek);
@@ -149,7 +151,7 @@ function catalogItemToForm(item: CourseCatalogItem): CourseForm {
 }
 
 // Front-end validation: if both periods set, start must be <= end.
-function periodError(f: CourseForm): string | null {
+export function periodError(f: CourseForm): string | null {
   const s = f.start_period.trim();
   const e = f.end_period.trim();
   if (s === "" || e === "") return null;

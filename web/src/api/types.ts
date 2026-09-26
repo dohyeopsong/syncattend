@@ -110,12 +110,6 @@ export interface AttendanceAggregate {
   unverified: string[]; // student_ids
 }
 
-export interface RiskWarning {
-  level: "info" | "warning" | "danger";
-  absences: number;
-  message: string;
-}
-
 export interface ApiError {
   detail?: string;
   code?: string;

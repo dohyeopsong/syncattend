@@ -22,7 +22,6 @@ interface AttendanceState {
   fetchAggregate: (sessionId: string) => Promise<void>;
   setDelta: (studentId: string, status: AttendanceStatus) => void;
   clearDelta: (studentId: string) => void;
-  clearAllDeltas: () => void;
   batchClose: (sessionId: string) => Promise<boolean>;
   correct: (recordId: string, status: AttendanceStatus) => Promise<boolean>;
   subscribeSse: (sessionId: string) => void;
@@ -60,8 +59,6 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
     delete next[studentId];
     set({ pendingDeltas: next });
   },
-
-  clearAllDeltas: () => set({ pendingDeltas: {} }),
 
   batchClose: async (sessionId) => {
     const deltas: AttendanceDelta[] = Object.entries(get().pendingDeltas).map(
