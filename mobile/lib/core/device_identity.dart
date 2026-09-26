@@ -33,10 +33,4 @@ class DeviceIdentity {
     _cached = created;
     return created;
   }
-
-  /// True if a UUID already existed before this launch (i.e. restored, not new).
-  Future<bool> wasRestored() async {
-    final existing = await _store.readDeviceUuid();
-    return existing != null && existing.isNotEmpty;
-  }
 }

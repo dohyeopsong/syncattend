@@ -19,13 +19,7 @@ void main() {
 
       // A new instance backed by the same store restores the same value.
       final id2 = DeviceIdentity(store);
-      expect(await id2.wasRestored(), isTrue);
       expect(await id2.getOrCreate(), equals(first));
-    });
-
-    test('reports not restored on a fresh store', () async {
-      final id = DeviceIdentity(FakeSecureStore());
-      expect(await id.wasRestored(), isFalse);
     });
   });
 

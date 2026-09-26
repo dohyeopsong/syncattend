@@ -15,11 +15,6 @@ final deviceIdentityProvider = Provider<DeviceIdentity>(
   (ref) => DeviceIdentity(ref.watch(secureStoreProvider)),
 );
 
-/// The device UUID (generated once, restored thereafter).
-final deviceUuidProvider = FutureProvider<String>(
-  (ref) => ref.watch(deviceIdentityProvider).getOrCreate(),
-);
-
 /// The authenticated student's own id, resolved from GET /auth/me. Used to
 /// subscribe to /sse/students/{id} and load /me/attendance without decoding the
 /// JWT client-side. Replaces the earlier hard-coded "me" placeholder.
