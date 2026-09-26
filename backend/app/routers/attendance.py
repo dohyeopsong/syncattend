@@ -14,7 +14,6 @@ verifyAttendance runs the 5-step server verification in order:
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
@@ -38,19 +37,13 @@ from app.schemas import (
     VerifyStatus,
 )
 from app.services.aggregate import absence_count, build_aggregate, risk_warning_for
+from app.services.ownership import load_owned_session
 from app.services.tokens import consume_nonce, cross_verify
+from app.timeutil import as_aware, now as _now
 
 router = APIRouter(tags=["attendance"])
 
 logger = logging.getLogger("syncattend.attendance")
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _as_aware(dt: datetime) -> datetime:
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _rejected(reason: VerifyReason, *, cross=False, device=False) -> VerifyResult:
@@ -90,7 +83,7 @@ async def verify_attendance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
 
     # (1) auth window open
-    window_open = session.status == "open" and _as_aware(session.window_expires_at) > _now()
+    window_open = session.status == "open" and as_aware(session.window_expires_at) > _now()
     if not window_open:
         response.status_code = status.HTTP_409_CONFLICT
         return _rejected(VerifyReason.window_closed)
@@ -193,17 +186,7 @@ async def get_my_attendance(
 
 
 async def _load_owned_session(db: AsyncSession, session_id: str, professor_id: str) -> Session:
-    session = (
-        await db.execute(select(Session).where(Session.id == session_id))
-    ).scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
-    course = (
-        await db.execute(select(Course).where(Course.id == session.course_id))
-    ).scalar_one_or_none()
-    if course is None or course.professor_id != professor_id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="not your session")
-    return session
+    return await load_owned_session(db, session_id, professor_id)
 
 
 @router.get(

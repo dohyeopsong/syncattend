@@ -27,8 +27,10 @@ from app.schemas import (
     EnrollmentOut,
     EnrollRequest,
     MyCourseItem,
+    PERIOD_ORDER_ERROR,
     Role,
     UpdateCourseRequest,
+    period_order_ok,
 )
 
 router = APIRouter(prefix="/courses", tags=["courses"])
@@ -129,15 +131,12 @@ async def update_course(
     for field, value in body.model_dump(exclude_unset=True).items():
         setattr(course, field, value)
     # After merge, guard the period pair on the resulting row (a partial update
-    # that sets only one period could otherwise invert start/end).
-    if (
-        course.start_period is not None
-        and course.end_period is not None
-        and course.start_period > course.end_period
-    ):
+    # that sets only one period could otherwise invert start/end). Same rule as
+    # the request schemas — see schemas.period_order_ok.
+    if not period_order_ok(course.start_period, course.end_period):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="start_period must be <= end_period",
+            detail=PERIOD_ORDER_ERROR,
         )
     await db.commit()
     await db.refresh(course)

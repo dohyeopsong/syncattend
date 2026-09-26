@@ -8,7 +8,7 @@ SQLite (tests). UUIDs are stored as strings for cross-DB portability.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
@@ -22,13 +22,11 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from app.timeutil import now as _now
+
 
 def _uuid() -> str:
     return str(uuid.uuid4())
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 class Base(DeclarativeBase):

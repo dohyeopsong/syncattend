@@ -133,13 +133,19 @@ class DeviceBinding(BaseModel):
 
 
 # ----------------------------------------------------------------- courses
+PERIOD_ORDER_ERROR = "start_period must be <= end_period"
+
+
+def period_order_ok(start: int | None, end: int | None) -> bool:
+    """True unless both periods are set and inverted (start > end)."""
+    return not (start is not None and end is not None and start > end)
+
+
 def _validate_period_order(model):
     """When both start_period and end_period are set, require start <= end.
     Range (1..MAX_PERIOD) is enforced per-field via Field(ge/le)."""
-    start = model.start_period
-    end = model.end_period
-    if start is not None and end is not None and start > end:
-        raise ValueError("start_period must be <= end_period")
+    if not period_order_ok(model.start_period, model.end_period):
+        raise ValueError(PERIOD_ORDER_ERROR)
     return model
 
 

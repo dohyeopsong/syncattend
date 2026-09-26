@@ -5,7 +5,7 @@ operationIds: createSession, extendWindow, closeSession, getSessionToken.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
 from app.db import get_db
-from app.deps import CurrentUser, get_current_user, require_professor
+from app.deps import CurrentUser, require_professor
 from app.models import Course, Session
 from app.redis_client import get_redis
 from app.schemas import (
@@ -22,24 +22,18 @@ from app.schemas import (
     SessionOut,
     SessionToken,
 )
+from app.services.ownership import load_owned_session
 from app.services.tokens import issue_tokens
+from app.timeutil import as_aware, now as _now
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _as_aware(dt: datetime) -> datetime:
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _window_state(session: Session) -> tuple[bool, int]:
     """Return (window_open, window_remaining_seconds)."""
     if session.status != "open":
         return False, 0
-    remaining = int((_as_aware(session.window_expires_at) - _now()).total_seconds())
+    remaining = int((as_aware(session.window_expires_at) - _now()).total_seconds())
     if remaining <= 0:
         return False, 0
     return True, remaining
@@ -59,19 +53,7 @@ def _to_out(session: Session) -> SessionOut:
 async def _load_owned_session(
     db: AsyncSession, session_id: str, professor_id: str
 ) -> Session:
-    session = (
-        await db.execute(select(Session).where(Session.id == session_id))
-    ).scalar_one_or_none()
-    if session is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
-    course = (
-        await db.execute(select(Course).where(Course.id == session.course_id))
-    ).scalar_one_or_none()
-    if course is None or course.professor_id != professor_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="not your session"
-        )
-    return session
+    return await load_owned_session(db, session_id, professor_id)
 
 
 @router.post(
@@ -116,7 +98,7 @@ async def extend_window(
     session = await _load_owned_session(db, id, prof.id)
     add_seconds = (body.add_seconds if body else None) or get_settings().auth_window_seconds
     now = _now()
-    base = max(_as_aware(session.window_expires_at), now)
+    base = max(as_aware(session.window_expires_at), now)
     session.status = "open"
     session.window_expires_at = base + timedelta(seconds=add_seconds)
     await db.commit()
