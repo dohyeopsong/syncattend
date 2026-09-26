@@ -447,3 +447,70 @@ async def test_catalog_blank_q_returns_all(client, session):
     # blank q -> still all (backward compatible)
     blank_r = await client.get("/courses/catalog", params={"q": "   "}, headers=shdr)
     assert len(blank_r.json()) == 2
+
+
+# ------------------------------------------------ catalog search (q) edge cases
+
+
+async def test_catalog_q_no_match_returns_empty(client, session):
+    """A q that matches none of name/professor_name/code yields an empty list
+    (not all rows, not an error)."""
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    await client.post(
+        "/courses",
+        json={"name": "자료구조", "professor_name": "홍길동", "code": "374150"},
+        headers=phdr,
+    )
+    shdr = auth_header(stu.id, "student")
+    r = await client.get("/courses/catalog", params={"q": "존재하지않는과목"}, headers=shdr)
+    assert r.status_code == 200, r.text
+    assert r.json() == []
+
+
+async def test_catalog_q_substring_middle_match(client, session):
+    """ILIKE is a substring match, so a fragment in the middle of the name
+    (not just a prefix) also matches."""
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    await client.post("/courses", json={"name": "고급파이썬프로그래밍"}, headers=phdr)
+    await client.post("/courses", json={"name": "자료구조"}, headers=phdr)
+    shdr = auth_header(stu.id, "student")
+    # "파이썬" appears in the middle of the first course name
+    r = await client.get("/courses/catalog", params={"q": "파이썬"}, headers=shdr)
+    assert r.status_code == 200, r.text
+    assert [c["name"] for c in r.json()] == ["고급파이썬프로그래밍"]
+
+
+async def test_catalog_q_code_partial_match(client, session):
+    """A partial 학수번호 fragment matches the code column via ILIKE substring."""
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    await client.post("/courses", json={"name": "A", "code": "374142"}, headers=phdr)
+    await client.post("/courses", json={"name": "B", "code": "998877"}, headers=phdr)
+    shdr = auth_header(stu.id, "student")
+    r = await client.get("/courses/catalog", params={"q": "3741"}, headers=shdr)
+    assert r.status_code == 200, r.text
+    assert [c["name"] for c in r.json()] == ["A"]
+
+
+async def test_catalog_q_matches_any_of_the_three_columns(client, session):
+    """A single q value can match different rows via *different* columns
+    (name OR professor_name OR code) — the OR is across all three."""
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    # "김" appears only in professor_name of one row and the name of another
+    await client.post("/courses", json={"name": "김밥학개론"}, headers=phdr)
+    await client.post(
+        "/courses", json={"name": "회로이론", "professor_name": "김철수"}, headers=phdr
+    )
+    await client.post("/courses", json={"name": "무관과목", "professor_name": "박씨"}, headers=phdr)
+    shdr = auth_header(stu.id, "student")
+    r = await client.get("/courses/catalog", params={"q": "김"}, headers=shdr)
+    assert r.status_code == 200, r.text
+    names = sorted(c["name"] for c in r.json())
+    assert names == ["김밥학개론", "회로이론"]

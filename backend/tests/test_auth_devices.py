@@ -169,3 +169,55 @@ async def test_reregister_request_malformed_email_is_422(client, session):
         headers=hdr,
     )
     assert r.status_code == 422
+
+
+# ------------------------------------------------ edge cases: getMyDevice 404
+async def test_get_my_device_no_binding_404(client, session):
+    """An authenticated account that never registered a device has no active
+    binding → getMyDevice returns 404 (not 200 with a null/empty body)."""
+    user = await seed_user(session, "s12@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    r = await client.get("/devices/me", headers=hdr)
+    assert r.status_code == 404, r.text
+    assert "binding" in r.json()["detail"].lower()
+
+
+async def test_get_my_device_404_after_reregister_does_not_leak_old(client, session):
+    """After re-registration deactivates the old binding, only the new active
+    one is returned; a fresh account still sees 404 (no cross-account leak)."""
+    user = await seed_user(session, "s13@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    # A second account with no binding must independently 404.
+    other = await seed_user(session, "s14@wku.ac.kr", "pw123456", "student")
+    other_hdr = auth_header(other.id, "student")
+
+    await client.post(
+        "/devices/register", json={"device_uuid": str(uuid.uuid4())}, headers=hdr
+    )
+    # s13 has a binding...
+    assert (await client.get("/devices/me", headers=hdr)).status_code == 200
+    # ...but s14 (never registered) still gets 404.
+    r = await client.get("/devices/me", headers=other_hdr)
+    assert r.status_code == 404, r.text
+
+
+# ------------------------------------------------ edge cases: refresh 401
+async def test_refresh_rejects_corrupted_token(client, session):
+    """A structurally broken / garbage refresh_token is a JWTError inside the
+    router → 401 (never a 500). Covers truncated and tampered payloads."""
+    # completely non-JWT garbage
+    r1 = await client.post("/auth/refresh", json={"refresh_token": "not.a.valid.jwt"})
+    assert r1.status_code == 401, r1.text
+
+    # a real token whose payload/signature bytes have been mangled
+    user = await seed_user(session, "s15@wku.ac.kr", "pw123456", "student")
+    login = (
+        await client.post(
+            "/auth/login", json={"email": "s15@wku.ac.kr", "password": "pw123456"}
+        )
+    ).json()
+    good = login["refresh_token"]
+    # flip the final segment (signature) so verification fails
+    tampered = good[:-4] + ("abcd" if good[-4:] != "abcd" else "efgh")
+    r2 = await client.post("/auth/refresh", json={"refresh_token": tampered})
+    assert r2.status_code == 401, r2.text

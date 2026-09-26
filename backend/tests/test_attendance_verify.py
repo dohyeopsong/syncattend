@@ -299,3 +299,49 @@ async def test_window_precedence_over_cross_verify(client, session):
     assert r.status_code == 409
     # window_closed (step 1) wins over cross_verify_failed (step 2)
     assert r.json()["reason"] == "window_closed"
+
+
+# ------------------------------------------------ edge cases: correctAttendance 404
+async def test_correct_attendance_record_not_found(client, session):
+    """PATCH /attendance/{record_id} for a non-existent record → 404
+    ('record not found'), checked before any ownership resolution."""
+    ctx = await _setup(client, session)
+    r = await client.patch(
+        f"/attendance/{uuid.uuid4()}",
+        json={"status": "present"},
+        headers=ctx["p_hdr"],
+    )
+    assert r.status_code == 404, r.text
+    assert "record not found" in r.json()["detail"].lower()
+
+
+async def test_correct_attendance_existing_record_succeeds(client, session):
+    """Sanity companion to the 404 case: a real record for the professor's own
+    session is correctable (proves the 404 is specific to a missing target,
+    not a broken happy path)."""
+    ctx = await _setup(client, session)
+    sid = ctx["session"].id
+    # student attends → creates a real attendance record
+    await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": sid,
+            "qr_token": ctx["tok"]["qr_token"],
+            "audio_nonce": ctx["tok"]["audio_nonce"],
+            "device_uuid": ctx["student_uuid"],
+        },
+        headers=ctx["s_hdr"],
+    )
+    agg = (await client.get(f"/sessions/{sid}/attendance", headers=ctx["p_hdr"])).json()
+    assert agg["present"] == 1
+    # fetch the record id via the student's own attendance history
+    my = (await client.get("/me/attendance", headers=ctx["s_hdr"])).json()
+    record_id = my[0]["record_id"]
+    r = await client.patch(
+        f"/attendance/{record_id}",
+        json={"status": "absent"},
+        headers=ctx["p_hdr"],
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "absent"
+    assert r.json()["record_id"] == record_id
