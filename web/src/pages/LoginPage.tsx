@@ -10,7 +10,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ShieldCheck } from "lucide-react";
+import { ShieldCheck, Loader2 } from "lucide-react";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -20,6 +20,8 @@ export function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const isLoading = status === "loading";
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -52,6 +54,7 @@ export function LoginPage() {
                 placeholder="professor@wku.ac.kr"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
+                disabled={isLoading}
                 required
               />
             </div>
@@ -65,6 +68,7 @@ export function LoginPage() {
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                disabled={isLoading}
                 required
               />
             </div>
@@ -76,9 +80,20 @@ export function LoginPage() {
             <Button
               type="submit"
               className="w-full"
-              disabled={status === "loading"}
+              disabled={isLoading}
+              aria-busy={isLoading}
             >
-              {status === "loading" ? "로그인 중…" : "로그인"}
+              {isLoading ? (
+                <>
+                  <Loader2
+                    className="h-4 w-4 animate-spin motion-reduce:animate-none"
+                    aria-hidden="true"
+                  />
+                  로그인 중…
+                </>
+              ) : (
+                "로그인"
+              )}
             </Button>
           </form>
         </CardContent>

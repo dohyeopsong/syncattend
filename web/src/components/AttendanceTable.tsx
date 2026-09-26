@@ -136,8 +136,8 @@ export function AttendanceTable() {
             자동 출석 처리되었습니다.
           </div>
         ) : (
-          <div className="overflow-hidden rounded-lg border">
-            <table className="w-full text-sm">
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full min-w-[32rem] text-sm">
               <thead className="bg-muted/50 text-left">
                 <tr>
                   <th className="px-4 py-2 font-medium">학번(student_id)</th>
