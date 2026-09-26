@@ -25,7 +25,7 @@ import type {
   DayOfWeek,
   UpdateCourseRequest,
 } from "@/api/types";
-import { BookOpen, Pencil, Play, Plus, Search, Trash2, X } from "lucide-react";
+import { BookOpen, Pencil, Play, Plus, Search, Trash2, Users, X } from "lucide-react";
 
 // day_of_week: 0=Mon … 6=Sun (per contract).
 const DAY_LABELS: Record<DayOfWeek, string> = {
@@ -452,6 +452,11 @@ export function CoursePanel() {
   const updateCourse = useCoursesStore((s) => s.updateCourse);
   const deleteCourse = useCoursesStore((s) => s.deleteCourse);
   const coursesError = useCoursesStore((s) => s.error);
+  // Enrollment (product decision #2): professor view is READ-ONLY. We only
+  // read the roster via fetchEnrollments/enrollments; student self-enroll is
+  // owned by mobile (B), so no enroll button/input is exposed here.
+  const enrollments = useCoursesStore((s) => s.enrollments);
+  const fetchEnrollments = useCoursesStore((s) => s.fetchEnrollments);
 
   const session = useSessionStore((s) => s.session);
   const openSession = useSessionStore((s) => s.openSession);
@@ -472,6 +477,9 @@ export function CoursePanel() {
     [courses, selected],
   );
 
+  // Read-only roster for the selected course.
+  const roster = selected ? enrollments[selected] : undefined;
+
   useEffect(() => {
     void fetchCourses();
   }, [fetchCourses]);
@@ -479,6 +487,11 @@ export function CoursePanel() {
   useEffect(() => {
     if (!selected && courses.length > 0) setSelected(courses[0].id);
   }, [courses, selected]);
+
+  // Load the roster whenever the selected course changes (read-only view).
+  useEffect(() => {
+    if (selected) void fetchEnrollments(selected);
+  }, [selected, fetchEnrollments]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -658,6 +671,40 @@ export function CoursePanel() {
             })}
           </ul>
         </div>
+
+        {/* ---- enrolled students (read-only) ---- */}
+        {selectedCourse && (
+          <div className="space-y-2 rounded-md border p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <Users className="h-4 w-4" /> 수강생
+                <Badge variant="secondary">
+                  {roster ? `${roster.length}명` : "…"}
+                </Badge>
+              </span>
+              <span className="text-[11px] text-muted-foreground">
+                조회 전용 · 수강신청은 학생 앱에서
+              </span>
+            </div>
+            {roster === undefined ? (
+              <p className="text-xs text-muted-foreground">불러오는 중…</p>
+            ) : roster.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                아직 수강생이 없습니다.
+              </p>
+            ) : (
+              <ul className="flex flex-wrap gap-1.5">
+                {roster.map((e) => (
+                  <li key={e.student_id}>
+                    <Badge variant="outline" className="font-mono">
+                      {e.student_id}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
 
         {/* ---- add form ---- */}
         {showAdd && (

@@ -11,7 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { AttendanceStatus } from "@/api/types";
-import { statusMeta } from "@/lib/status";
+import { statusMeta, deriveAttendanceStats } from "@/lib/status";
 import { CheckCircle2, XCircle, Clock, RefreshCw, ClipboardCheck } from "lucide-react";
 
 // Screen (b): Opt-out absentee-centric table. Under Opt-out, verified students
@@ -48,10 +48,9 @@ export function AttendanceTable() {
 
   const unverified = aggregate.unverified;
   const pendingCount = Object.keys(pendingDeltas).length;
-  const rate =
-    aggregate.total > 0
-      ? Math.round((aggregate.present / aggregate.total) * 100)
-      : 0;
+  // Single source of truth for derived figures (see lib/status.ts).
+  const stats = deriveAttendanceStats(aggregate, pendingDeltas);
+  const rate = stats.presentRate;
 
   const statusFor = (studentId: string): AttendanceStatus =>
     pendingDeltas[studentId] ?? "pending";
@@ -97,18 +96,18 @@ export function AttendanceTable() {
         {/* Summary */}
         <div className="grid grid-cols-3 gap-3">
           <div className="rounded-lg border p-3 text-center">
-            <div className="text-2xl font-bold">{aggregate.total}</div>
+            <div className="text-2xl font-bold">{stats.total}</div>
             <div className="text-xs text-muted-foreground">전체 인원</div>
           </div>
           <div className="rounded-lg border p-3 text-center">
             <div className="text-2xl font-bold text-success">
-              {aggregate.present}
+              {stats.present}
             </div>
             <div className="text-xs text-muted-foreground">출석 ({rate}%)</div>
           </div>
           <div className="rounded-lg border p-3 text-center">
             <div className="text-2xl font-bold text-warning">
-              {unverified.length}
+              {stats.unverified}
             </div>
             <div className="text-xs text-muted-foreground">미인증</div>
           </div>

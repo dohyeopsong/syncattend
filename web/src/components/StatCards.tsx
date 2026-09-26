@@ -1,6 +1,7 @@
 import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
 import { Card } from "@/components/ui/card";
+import { deriveAttendanceStats } from "@/lib/status";
 import { CheckCircle2, Clock, XCircle, HelpCircle } from "lucide-react";
 
 // Dashboard stat cards (design guide §3): 4 across — 출석 / 대기 / 결석 / 미인증.
@@ -10,14 +11,9 @@ export function StatCards() {
   const aggregate = useAttendanceStore((s) => s.aggregate);
   const pendingDeltas = useAttendanceStore((s) => s.pendingDeltas);
 
-  const total = aggregate?.total ?? 0;
-  const present = aggregate?.present ?? 0;
-  const unverified = aggregate?.unverified.length ?? 0;
-
-  // Pending corrections queued by the professor (from the opt-out review).
-  const deltaValues = Object.values(pendingDeltas);
-  const pending = deltaValues.filter((s) => s === "pending").length;
-  const absent = deltaValues.filter((s) => s === "absent").length;
+  // Single source of truth for every derived figure (see lib/status.ts).
+  const { total, present, unverified, pendingCorrections, absentCorrections, presentRate } =
+    deriveAttendanceStats(aggregate, pendingDeltas);
 
   const stats = [
     {
@@ -26,8 +22,8 @@ export function StatCards() {
       Icon: CheckCircle2,
       tone: "text-success",
     },
-    { label: "대기", value: pending, Icon: Clock, tone: "text-warning" },
-    { label: "결석", value: absent, Icon: XCircle, tone: "text-destructive" },
+    { label: "대기", value: pendingCorrections, Icon: Clock, tone: "text-warning" },
+    { label: "결석", value: absentCorrections, Icon: XCircle, tone: "text-destructive" },
     {
       label: "미인증",
       value: unverified,
@@ -49,7 +45,7 @@ export function StatCards() {
           </div>
           {label === "출석" && session && total > 0 && (
             <div className="mt-1 text-xs text-muted-foreground">
-              전체 {total}명 중 {Math.round((present / total) * 100)}%
+              전체 {total}명 중 {presentRate}%
             </div>
           )}
         </Card>

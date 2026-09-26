@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Activity, AlertTriangle, Wifi, WifiOff } from "lucide-react";
+import { deriveAttendanceStats } from "@/lib/status";
 
 // Screen (d): realtime attendance stream via SSE (/sse/sessions/{id}).
 // The professor sees the live present/unverified counts pushed by the backend,
@@ -31,16 +32,15 @@ export function RealtimeRiskPanel() {
     return () => unsubscribeSse();
   }, [sessionId, isOpen, subscribeSse, unsubscribeSse]);
 
-  const total = aggregate?.total ?? 0;
-  const present = aggregate?.present ?? 0;
-  const unverified = aggregate?.unverified.length ?? 0;
-  const unverifiedShare = total > 0 ? unverified / total : 0;
+  // Single source of truth for derived figures (see lib/status.ts).
+  const { total, present, unverified, unverifiedShare, unverifiedRate } =
+    deriveAttendanceStats(aggregate);
 
   const risk: { level: "info" | "warning" | "danger"; message: string } =
     unverifiedShare >= 0.5
       ? {
           level: "danger",
-          message: `미인증 비율이 ${Math.round(unverifiedShare * 100)}%입니다. 인증 창 연장 또는 재송출을 검토하세요.`,
+          message: `미인증 비율이 ${unverifiedRate}%입니다. 인증 창 연장 또는 재송출을 검토하세요.`,
         }
       : unverifiedShare >= 0.2
         ? {
