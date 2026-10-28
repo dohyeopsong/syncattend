@@ -98,7 +98,18 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
     try {
       const items = await apiListCatalog(q);
       const filtered = items.filter((c) => matchesQuery(c, q, field));
-      set({ catalog: filtered, catalogLoading: false });
+      // Dedup by code (fallback to name when code is null, then id) so a
+      // course offered as multiple schedule rows appears once in the
+      // autocomplete. The first match wins; the professor can adjust
+      // day/period in the add form.
+      const seen = new Set<string>();
+      const deduped = filtered.filter((c) => {
+        const key = (c.code ?? c.name ?? c.id).toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      set({ catalog: deduped, catalogLoading: false });
     } catch (e) {
       set({ catalogLoading: false, error: toMessage(e) });
     }

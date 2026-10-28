@@ -102,7 +102,9 @@ void main() {
         'name': '자료구조',
         'department': '컴퓨터공학과',
         'professor': '김교수',
-        'day_of_week': 1,
+        // Contract stores day_of_week as 0=Mon..6=Sun; fromJson normalizes to
+        // internal 1=Mon..7=Sun, so 0 → 1 (월).
+        'day_of_week': 0,
         'start_period': 3,
         'end_period': 4,
         'location': '401',
@@ -111,6 +113,16 @@ void main() {
       expect(c.professorName, '김교수');
       expect(c.dayOfWeek, 1);
       expect(c.periodSpan, 2);
+      expect(c.hasSchedule, isTrue);
+    });
+
+    test('fromJson marks unscheduled courses hasSchedule=false', () {
+      final c = Course.fromJson({
+        'id': 'c2',
+        'name': 'E2E',
+        'professor_name': '교수',
+      });
+      expect(c.hasSchedule, isFalse);
     });
   });
 
@@ -127,27 +139,31 @@ void main() {
   });
 
   group('MockApiClient course flow', () {
+    // Real course UUIDs from the DB-backed catalog (see MockApiClient._catalog).
+    const webProg = 'c42911ff-7c77-46b1-8b5a-6cd70e79f6c1'; // not seeded
+    const csIntro = '4b8b48f6-7e20-4f34-abed-4b34dca8721b'; // seeded enrolled
+
     test('enroll then unenroll toggles my-courses membership', () async {
       final api = MockApiClient();
       final before = await api.getMyCourses();
-      expect(before.any((c) => c.id == 'c-net'), isFalse);
+      expect(before.any((c) => c.id == webProg), isFalse);
 
-      await api.enrollSelf('c-net');
+      await api.enrollSelf(webProg);
       final after = await api.getMyCourses();
-      expect(after.any((c) => c.id == 'c-net'), isTrue);
+      expect(after.any((c) => c.id == webProg), isTrue);
       expect(after.every((c) => c.enrolled), isTrue);
 
-      await api.unenrollSelf('c-net');
+      await api.unenrollSelf(webProg);
       final removed = await api.getMyCourses();
-      expect(removed.any((c) => c.id == 'c-net'), isFalse);
+      expect(removed.any((c) => c.id == webProg), isFalse);
     });
 
     test('catalog marks enrolled courses', () async {
       final api = MockApiClient();
       final catalog = await api.getCourseCatalog();
-      final ds = catalog.firstWhere((c) => c.id == 'c-ds');
+      final ds = catalog.firstWhere((c) => c.id == csIntro);
       expect(ds.enrolled, isTrue); // seeded
-      final net = catalog.firstWhere((c) => c.id == 'c-net');
+      final net = catalog.firstWhere((c) => c.id == webProg);
       expect(net.enrolled, isFalse);
     });
 
@@ -175,17 +191,21 @@ void main() {
 
     testWidgets('renders course blocks + conflict banner when clashing',
         (tester) async {
-      // c-ds Mon3-4 clashes with c-algo Mon4-5; c-os Tue5-6 does not.
+      // Two C언어프로그래밍 sections (same code) clash on Mon 3교시;
+      // 파이썬프로그래밍 (Tue 1-2) does not clash. Mirrors real DB rows.
       final api = _InstantCoursesApi([
-        _c('c-ds', day: 1, start: 3, end: 4, name: '자료구조'),
-        _c('c-algo', day: 1, start: 4, end: 5, name: '알고리즘'),
-        _c('c-os', day: 2, start: 5, end: 6, name: '운영체제'),
+        _c('e0068e9a-da44-4f30-ab08-d308439d3d90',
+            day: 1, start: 1, end: 3, name: 'C언어프로그래밍'),
+        _c('57ff561b-2da1-4fc4-9d93-81523809d3f7',
+            day: 1, start: 3, end: 4, name: 'C언어프로그래밍'),
+        _c('98902951-0d19-4b24-9c34-2056b9657da0',
+            day: 2, start: 1, end: 2, name: '파이썬프로그래밍'),
       ]);
       await tester.pumpWidget(wrap(api));
       await tester.pumpAndSettle();
 
-      expect(find.text('자료구조'), findsWidgets);
-      expect(find.text('알고리즘'), findsWidgets);
+      expect(find.text('C언어프로그래밍'), findsWidgets);
+      expect(find.text('파이썬프로그래밍'), findsWidgets);
       expect(find.text('시간이 겹치는 강의가 있습니다.'), findsOneWidget);
     });
   });

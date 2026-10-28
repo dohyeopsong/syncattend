@@ -69,7 +69,7 @@ export function SessionTokenPanel() {
   }, [active, token]);
 
   useEffect(() => {
-    if (active) startTokenPolling(5000);
+    if (active) startTokenPolling(15000);
     else stopTokenPolling();
     return () => stopTokenPolling();
   }, [active, startTokenPolling, stopTokenPolling]);
@@ -103,6 +103,17 @@ export function SessionTokenPanel() {
     emitterRef.current?.stop();
     setEmitting(false);
   }
+
+  // AUTO-EMIT: when a session opens and the first token arrives, start
+  // ultrasonic emission automatically — the professor should not have to
+  // remember to click "송출 시작" every time. The "세션 열기" click that opened
+  // the session counts as the user gesture that unlocks AudioContext.
+  useEffect(() => {
+    if (active && token?.audio_nonce && !emitting) {
+      void startEmitting();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, token?.audio_nonce]);
 
   // Push new nonce to the running emitter whenever the token rotates.
   useEffect(() => {

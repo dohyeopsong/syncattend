@@ -43,11 +43,12 @@ void main() {
     await tester.pumpWidget(_app(c));
     await tester.pumpAndSettle();
 
-    // MockApiClient.getMyAttendance() returns 3 rows (자료구조/운영체제/네트워크).
+    // MockApiClient.getMyAttendance() returns 3 rows
+    // (컴퓨터개론/파이썬프로그래밍/데이터구조), matching the DB-backed catalog.
     expect(find.byType(ListTile), findsNWidgets(3));
-    expect(find.text('자료구조'), findsOneWidget);
-    expect(find.text('운영체제'), findsOneWidget);
-    expect(find.text('네트워크'), findsOneWidget);
+    expect(find.text('컴퓨터개론'), findsOneWidget);
+    expect(find.text('파이썬프로그래밍'), findsOneWidget);
+    expect(find.text('데이터구조'), findsOneWidget);
 
     // Status badges carry Korean labels (present/absent/pending spread).
     expect(find.text(attendanceStatusLabel(AttendanceStatus.present)),

@@ -39,8 +39,8 @@ export interface EmitterProtocol {
 
 export const DEFAULT_PROTOCOL: EmitterProtocol = {
   sampleRate: 44100,
-  bandLowHz: 17000,
-  bandHighHz: 18500,
+  bandLowHz: 18500,
+  bandHighHz: 20000,
   toneSlots: 16,
   symbolMs: 60,
 };
@@ -158,6 +158,7 @@ export class UltrasonicEmitter {
   private masterGain: GainNode | null = null;
   private repeatTimer: ReturnType<typeof setInterval> | null = null;
   private currentSource: AudioBufferSourceNode | null = null;
+  private currentEnv: GainNode | null = null;
 
   private proto: EmitterProtocol;
   private gain: number;
@@ -213,27 +214,65 @@ export class UltrasonicEmitter {
     const nibbles = nonceToNibbles(nonce).slice(0, 8); // 8-nibble frame
     if (nibbles.length === 0) return;
     const pcm = buildFramePcm(this.proto, nibbles, {
-      gain: 1, // masterGain applies output level; keep buffer normalized
+      gain: 1, // per-source env gain (below) applies output level
       toneFraction: this.toneFraction,
       rampFraction: this.rampFraction,
     });
     const buffer = ctx.createBuffer(1, pcm.length, this.proto.sampleRate);
     buffer.getChannelData(0).set(pcm);
 
-    // Stop any in-flight frame before scheduling the next.
-    if (this.currentSource) {
-      try {
-        this.currentSource.stop();
-      } catch {
-        // already stopped
-      }
-      this.currentSource.disconnect();
-    }
+    // Fade out any in-flight frame BEFORE swapping, so the old sine is not
+    // hard-cut (a discontinuity here is the "팍" click/pop the professor hears
+    // on each token rotation / frame repeat). The old source is stopped just
+    // after the fade completes; its gain node is GC'd once disconnected.
+    this.fadeOutCurrent();
+
+    // Per-source envelope gain: short fade-in + fade-out at the very ends so a
+    // mid-frame stop is click-free. masterGain still sets overall reach.
+    const env = ctx.createGain();
+    env.gain.value = this.gain;
+    const now = ctx.currentTime;
+    const dur = pcm.length / this.proto.sampleRate;
+    env.gain.setValueAtTime(0, now);
+    env.gain.linearRampToValueAtTime(this.gain, now + 0.004);
+    env.gain.setValueAtTime(this.gain, now + dur - 0.004);
+    env.gain.linearRampToValueAtTime(0, now + dur);
+
     const src = ctx.createBufferSource();
     src.buffer = buffer;
-    src.connect(this.masterGain);
-    src.start();
+    src.connect(env);
+    env.connect(this.masterGain);
+    src.start(now);
+    src.stop(now + dur + 0.02);
     this.currentSource = src;
+    this.currentEnv = env;
+  }
+
+  /**
+   * Fade out + stop the active source without a hard cut. Used on frame swap
+   * and on stop(). A ~4 ms linear ramp to 0 eliminates the discontinuity that
+   * otherwise clicks the speaker ("팍").
+   */
+  private fadeOutCurrent() {
+    const ctx = this.ctx;
+    const src = this.currentSource;
+    const env = this.currentEnv;
+    if (!ctx || !src || !env) return;
+    const now = ctx.currentTime;
+    try {
+      env.gain.cancelScheduledValues(now);
+      env.gain.setValueAtTime(env.gain.value, now);
+      env.gain.linearRampToValueAtTime(0, now + 0.004);
+      src.stop(now + 0.006);
+    } catch {
+      // already stopped
+    }
+    src.onended = () => {
+      try { src.disconnect(); } catch { /* gone */ }
+      try { env.disconnect(); } catch { /* gone */ }
+    };
+    this.currentSource = null;
+    this.currentEnv = null;
   }
 
   /**
@@ -268,15 +307,8 @@ export class UltrasonicEmitter {
       clearInterval(this.repeatTimer);
       this.repeatTimer = null;
     }
-    if (this.currentSource) {
-      try {
-        this.currentSource.stop();
-      } catch {
-        // already stopped
-      }
-      this.currentSource.disconnect();
-      this.currentSource = null;
-    }
+    // Fade out instead of hard-cutting, so stopping emits no click.
+    this.fadeOutCurrent();
   }
 
   /** Fully release the AudioContext. */

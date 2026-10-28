@@ -229,7 +229,7 @@ function CourseFields({
           요일
         </label>
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-soft"
           value={form.day_of_week}
           onChange={(e) => upd({ day_of_week: e.target.value })}
         >
@@ -246,7 +246,7 @@ function CourseFields({
           시작 교시
         </label>
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-soft"
           value={form.start_period}
           onChange={(e) => upd({ start_period: e.target.value })}
         >
@@ -263,7 +263,7 @@ function CourseFields({
           종료 교시
         </label>
         <select
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          className="flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-soft"
           value={form.end_period}
           onChange={(e) => upd({ end_period: e.target.value })}
         >
@@ -325,12 +325,24 @@ function CatalogSearch({
   const catalogLoading = useCoursesStore((s) => s.catalogLoading);
   const searchCatalog = useCoursesStore((s) => s.searchCatalog);
   const clearCatalog = useCoursesStore((s) => s.clearCatalog);
+  const courses = useCoursesStore((s) => s.courses);
 
   const [query, setQuery] = useState("");
   const [field, setField] = useState<SearchField>("all");
   const [open, setOpen] = useState(false);
   const debounced = useDebounced(query, 300);
   const boxRef = useRef<HTMLDivElement>(null);
+
+  // Keys of courses the professor already added, so an already-added catalog
+  // entry can't be re-added. Key matches the dedup key in searchCatalog:
+  // code → fallback to name → fallback to id.
+  const addedKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const c of courses) {
+      s.add((c.code ?? c.name ?? c.id).toLowerCase());
+    }
+    return s;
+  }, [courses]);
 
   useEffect(() => {
     void searchCatalog(debounced, field);
@@ -368,7 +380,7 @@ function CatalogSearch({
       <div className="flex gap-2">
         {/* Search-by selector: narrow the autocomplete to one field. */}
         <select
-          className="h-10 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+          className="h-10 shrink-0 rounded-xl border border-input bg-card px-2 text-sm shadow-soft"
           value={field}
           onChange={(e) => setField(e.target.value as SearchField)}
           aria-label="검색 기준"
@@ -401,7 +413,7 @@ function CatalogSearch({
         <ul
           id="catalog-listbox"
           role="listbox"
-          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-md border bg-background shadow-md"
+          className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-xl border border-border/60 bg-card shadow-soft-lg"
         >
           {catalogLoading && (
             <li className="px-3 py-2 text-sm text-muted-foreground">
@@ -413,31 +425,40 @@ function CatalogSearch({
               검색 결과가 없습니다. 아래에서 직접 입력하세요.
             </li>
           )}
-          {catalog.map((item) => (
-            <li key={item.id} role="option" aria-selected={false}>
-              <button
-                type="button"
-                className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent"
-                onClick={() => {
-                  onSelect(item);
-                  setQuery("");
-                  setOpen(false);
-                  clearCatalog();
-                }}
-              >
-                <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
-                  {item.name}
-                  {item.code && (
-                    <Badge variant="outline">{item.code}</Badge>
-                  )}
-                </span>
-                <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
-                  {item.professor_name && <span>{item.professor_name}</span>}
-                  {item.department && <span>{item.department}</span>}
-                </span>
-              </button>
-            </li>
-          ))}
+          {catalog.map((item) => {
+            const isAdded = addedKeys.has(
+              (item.code ?? item.name ?? item.id).toLowerCase(),
+            );
+            return (
+              <li key={item.id} role="option" aria-selected={false}>
+                <button
+                  type="button"
+                  disabled={isAdded}
+                  className="flex w-full flex-col gap-0.5 px-3 py-2 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+                  onClick={() => {
+                    onSelect(item);
+                    setQuery("");
+                    setOpen(false);
+                    clearCatalog();
+                  }}
+                >
+                  <span className="flex flex-wrap items-center gap-2 text-sm font-medium">
+                    {item.name}
+                    {item.code && (
+                      <Badge variant="outline">{item.code}</Badge>
+                    )}
+                    {isAdded && (
+                      <Badge variant="secondary">이미 추가됨</Badge>
+                    )}
+                  </span>
+                  <span className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">
+                    {item.professor_name && <span>{item.professor_name}</span>}
+                    {item.department && <span>{item.department}</span>}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -472,6 +493,15 @@ export function CoursePanel() {
   const [editForm, setEditForm] = useState<CourseForm>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
 
+  // Whether the add form already matches an existing course (by code, fallback
+  // name). Used to disable the submit button and warn on direct manual entry.
+  const addDupKey = (addForm.code?.trim() || addForm.name.trim()).toLowerCase();
+  const alreadyExists =
+    addDupKey.length > 0 &&
+    courses.some(
+      (c) => (c.code ?? c.name ?? c.id).toLowerCase() === addDupKey,
+    );
+
   const selectedCourse = useMemo(
     () => courses.find((c) => c.id === selected),
     [courses, selected],
@@ -488,6 +518,16 @@ export function CoursePanel() {
     if (!selected && courses.length > 0) setSelected(courses[0].id);
   }, [courses, selected]);
 
+  // Close the add-course modal on Escape.
+  useEffect(() => {
+    if (!showAdd) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setShowAdd(false);
+    }
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [showAdd]);
+
   // Load the roster whenever the selected course changes (read-only view).
   useEffect(() => {
     if (selected) void fetchEnrollments(selected);
@@ -497,6 +537,10 @@ export function CoursePanel() {
     e.preventDefault();
     if (!addForm.name.trim()) return;
     if (periodError(addForm)) return; // start<=end guard
+    // Block re-adding a course the professor already has (by code, fallback
+    // name). Matches the dedup/added key used in CatalogSearch so direct
+    // manual entry can't bypass the disabled autocomplete option.
+    if (alreadyExists) return;
     setBusy(true);
     const c = await addCourse(formToPayload(addForm));
     setBusy(false);
@@ -562,29 +606,21 @@ export function CoursePanel() {
               size="sm"
               variant="outline"
               onClick={() => {
-                setShowAdd((v) => !v);
+                setShowAdd(true);
                 setAddForm(EMPTY_FORM);
               }}
             >
-              {showAdd ? (
-                <>
-                  <X className="h-4 w-4" /> 닫기
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4" /> 강좌 추가
-                </>
-              )}
+              <Plus className="h-4 w-4" /> 강좌 추가
             </Button>
           </div>
 
           {courses.length === 0 && !showAdd && (
-            <p className="rounded-md border border-dashed p-4 text-center text-sm text-muted-foreground">
+            <p className="rounded-xl border border-dashed border-border/70 bg-muted/30 p-4 text-center text-sm text-muted-foreground">
               등록된 강좌가 없습니다. “강좌 추가”로 시작하세요.
             </p>
           )}
 
-          <ul className="divide-y rounded-md border">
+          <ul className="divide-y divide-border/60 rounded-xl border border-border/60 bg-card">
             {courses.map((c) => {
               const isSelected = c.id === selected;
               const isEditing = c.id === editingId;
@@ -674,10 +710,13 @@ export function CoursePanel() {
 
         {/* ---- enrolled students (read-only) ---- */}
         {selectedCourse && (
-          <div className="space-y-2 rounded-md border p-3">
+          <div className="space-y-2 rounded-xl border border-border/60 bg-muted/30 p-3">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-2 text-sm font-medium">
-                <Users className="h-4 w-4" /> 수강생
+                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Users className="h-4 w-4" />
+                </span>
+                수강생
                 <Badge variant="secondary">
                   {roster ? `${roster.length}명` : "…"}
                 </Badge>
@@ -706,40 +745,76 @@ export function CoursePanel() {
           </div>
         )}
 
-        {/* ---- add form ---- */}
+        {/* ---- add form (modal) ---- */}
         {showAdd && (
-          <form
-            onSubmit={onCreate}
-            className="space-y-3 rounded-md border border-dashed p-3"
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            onMouseDown={(e) => {
+              // Close when clicking the backdrop (not its children).
+              if (e.target === e.currentTarget) setShowAdd(false);
+            }}
           >
-            <p className="text-sm font-medium">새 강좌 추가</p>
-            {/* Autocomplete: pick from the catalog to auto-fill, then adjust
-                요일/교시. If no match, fill the fields below manually. */}
-            <CatalogSearch
-              onSelect={(item) =>
-                setAddForm((prev) => ({
-                  ...catalogItemToForm(item),
-                  // keep whatever the professor may have already set for day/period
-                  day_of_week: prev.day_of_week || (item.day_of_week != null ? String(item.day_of_week) : ""),
-                  start_period: prev.start_period || (item.start_period != null ? String(item.start_period) : ""),
-                  end_period: prev.end_period || (item.end_period != null ? String(item.end_period) : ""),
-                }))
-              }
-            />
-            <p className="text-[11px] text-muted-foreground">
-              검색 결과가 없으면 아래에서 직접 입력하세요.
-            </p>
-            <CourseFields form={addForm} setForm={setAddForm} />
-            <div className="flex justify-end">
-              <Button
-                type="submit"
-                variant="outline"
-                disabled={busy || !addForm.name.trim() || !!periodError(addForm)}
-              >
-                <Plus className="h-4 w-4" /> 추가
-              </Button>
+            <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-card p-4 shadow-soft-lg">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-medium">새 강좌 추가</p>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={() => setShowAdd(false)}
+                  aria-label="닫기"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              <form onSubmit={onCreate} className="space-y-3">
+                {/* Autocomplete: pick from the catalog to auto-fill, then adjust
+                    요일/교시. If no match, fill the fields below manually. */}
+                <CatalogSearch
+                  onSelect={(item) =>
+                    setAddForm((prev) => ({
+                      ...catalogItemToForm(item),
+                      // keep whatever the professor may have already set for day/period
+                      day_of_week: prev.day_of_week || (item.day_of_week != null ? String(item.day_of_week) : ""),
+                      start_period: prev.start_period || (item.start_period != null ? String(item.start_period) : ""),
+                      end_period: prev.end_period || (item.end_period != null ? String(item.end_period) : ""),
+                    }))
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  검색 결과가 없으면 아래에서 직접 입력하세요.
+                </p>
+                <CourseFields form={addForm} setForm={setAddForm} />
+                {alreadyExists && (
+                  <p className="text-[11px] text-destructive">
+                    이미 추가된 강좌입니다. 같은 학수번호(또는 강좌명)의 강좌는 중복 추가할 수 없습니다.
+                  </p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setShowAdd(false)}
+                  >
+                    취소
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="outline"
+                    disabled={
+                      busy ||
+                      !addForm.name.trim() ||
+                      !!periodError(addForm) ||
+                      alreadyExists
+                    }
+                  >
+                    <Plus className="h-4 w-4" /> 추가
+                  </Button>
+                </div>
+              </form>
             </div>
-          </form>
+          </div>
         )}
 
         {/* ---- session open ---- */}
