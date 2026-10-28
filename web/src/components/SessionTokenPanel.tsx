@@ -61,12 +61,12 @@ export function SessionTokenPanel() {
 
   // Local 1s tick, floored at 0. Display only; stops when inactive.
   useEffect(() => {
-    if (!active || !token) return;
+    if (!active) return;
     const id = setInterval(() => {
       setTtlRemaining((s) => (s > 0 ? s - 1 : 0));
     }, 1000);
     return () => clearInterval(id);
-  }, [active, token]);
+  }, [active]);
 
   useEffect(() => {
     if (active) startTokenPolling(15000);
