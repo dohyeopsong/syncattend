@@ -227,15 +227,19 @@ export class UltrasonicEmitter {
     // after the fade completes; its gain node is GC'd once disconnected.
     this.fadeOutCurrent();
 
-    // Per-source envelope gain: short fade-in + fade-out at the very ends so a
-    // mid-frame stop is click-free. masterGain still sets overall reach.
+    // Per-source envelope gain: fade-in + fade-out at the ends so a mid-frame
+    // stop (and the very first frame on start) is click-free. Initial value is
+    // explicitly 0 BEFORE scheduling so the first sample can never be non-zero
+    // (the "팍" on session start came from a non-zero first sample). 8 ms ramps
+    // are short enough to stay inaudible against the 60 ms symbol but remove
+    // the click. masterGain still sets overall reach.
     const env = ctx.createGain();
-    env.gain.value = this.gain;
+    env.gain.value = 0;
     const now = ctx.currentTime;
     const dur = pcm.length / this.proto.sampleRate;
     env.gain.setValueAtTime(0, now);
-    env.gain.linearRampToValueAtTime(this.gain, now + 0.004);
-    env.gain.setValueAtTime(this.gain, now + dur - 0.004);
+    env.gain.linearRampToValueAtTime(this.gain, now + 0.008);
+    env.gain.setValueAtTime(this.gain, now + dur - 0.008);
     env.gain.linearRampToValueAtTime(0, now + dur);
 
     const src = ctx.createBufferSource();

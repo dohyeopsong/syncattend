@@ -59,11 +59,23 @@ export function SessionTokenPanel() {
     setTtlRemaining(rotationTtl);
   }, [rotationKey, rotationTtl]);
 
-  // Local 1s tick, floored at 0. Display only; stops when inactive.
+  // ---- DISPLAY-ONLY auth-window countdown ---------------------------------
+  // session.window_remaining comes from the backend and only refreshes on poll
+  // (15s), so without a local tick it jumps 15s at a time. We seed a local
+  // number from window_remaining and tick it down 1s, re-syncing whenever the
+  // backend value changes (open / extend / poll).
+  const windowRemaining = session?.window_remaining ?? 0;
+  const [windowTick, setWindowTick] = useState(windowRemaining);
+  useEffect(() => {
+    setWindowTick(windowRemaining);
+  }, [windowRemaining, active]);
+
+  // Local 1s tick for BOTH countdowns, floored at 0. Display only.
   useEffect(() => {
     if (!active) return;
     const id = setInterval(() => {
       setTtlRemaining((s) => (s > 0 ? s - 1 : 0));
+      setWindowTick((s) => (s > 0 ? s - 1 : 0));
     }, 1000);
     return () => clearInterval(id);
   }, [active]);
@@ -279,7 +291,7 @@ export function SessionTokenPanel() {
             인증 창 남은 시간
           </div>
           <Badge variant={session.window_open ? "default" : "secondary"}>
-            {session.window_remaining}s
+            {windowTick}s
           </Badge>
         </div>
 
