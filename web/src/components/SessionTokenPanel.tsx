@@ -175,8 +175,7 @@ export function SessionTokenPanel() {
           )}
         </div>
         <CardDescription>
-          세션 <code className="font-mono">{session.session_id}</code> · 토큰은
-          15초마다 회전(단일 사용)
+          세션을 열면 회전 QR·초음파 토큰이 자동 송출됩니다.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -197,13 +196,6 @@ export function SessionTokenPanel() {
           )}
           {token && (
             <div className="w-full space-y-2 text-sm">
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Volume2 className="h-4 w-4" />
-                음향 nonce:{" "}
-                <code className="font-mono text-foreground">
-                  {token.audio_nonce}
-                </code>
-              </div>
               {/* Token TTL rotation, visualized (display only). */}
               <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
                 <CountdownRing
