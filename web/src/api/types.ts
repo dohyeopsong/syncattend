@@ -15,6 +15,10 @@ export interface LoginRequest {
   password: string;
 }
 
+export interface RefreshRequest {
+  refresh_token: string;
+}
+
 // day_of_week: 0=Mon … 6=Sun (per contract), null when unscheduled.
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -69,6 +73,10 @@ export interface CourseCatalogItem {
 export interface Enrollment {
   course_id: string;
   student_id: string;
+  // Readable display fields joined from the user (school student number + name).
+  // Bots surface here as e.g. "SIMbot1a2b3c4d" / "시뮬_bot1a2b3c4d".
+  student_number?: string | null;
+  name?: string | null;
 }
 
 export interface Session {
@@ -103,11 +111,61 @@ export interface AttendanceDelta {
   status: AttendanceStatus;
 }
 
+export interface UnverifiedStudent {
+  student_id: string; // internal user id (UUID) — the Delta/batch key
+  student_number?: string | null; // school 학번
+  name?: string | null; // display name
+}
+
 export interface AttendanceAggregate {
   session_id: string;
   total: number;
   present: number;
-  unverified: string[]; // student_ids
+  absent: number;
+  unverified: UnverifiedStudent[]; // readable student summaries, not raw UUIDs
+}
+
+export type VerifyReason =
+  | "window_closed"
+  | "cross_verify_failed"
+  | "nonce_reused"
+  | "device_mismatch"
+  | "duplicate_attendance";
+
+// One verification scenario run during simulation (POST /sessions/{id}/simulate).
+export interface SimulationCase {
+  name: string;
+  expected_rejected: boolean;
+  expected_reason: VerifyReason | null;
+  rejected: boolean;
+  reason: VerifyReason | null;
+  passed: boolean;
+}
+
+export interface SimulationResult {
+  session_id: string;
+  cases: SimulationCase[];
+  cleaned_up: boolean;
+}
+
+export interface SimulateBotsRequest {
+  count: number;
+  present_ratio: number;
+  delay_min: number;
+  delay_max: number;
+}
+
+export interface SimulateBotsResult {
+  course_id: string;
+  total_bots: number;
+  present: number;
+  unverified: number;
+}
+
+export interface BotCleanupResult {
+  course_id: string;
+  removed: number;
+  cleaned_up: boolean;
 }
 
 export interface ApiError {

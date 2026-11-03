@@ -30,13 +30,13 @@ export function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 px-4">
-      <Card className="w-full max-w-md">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
+      <Card className="w-full max-w-md shadow-soft-lg">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-            <ShieldCheck className="h-6 w-6 text-primary" />
+          <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary shadow-soft">
+            <ShieldCheck className="h-8 w-8 text-primary-foreground" />
           </div>
-          <CardTitle>Syncattend 교수 대시보드</CardTitle>
+          <CardTitle className="text-xl">Syncattend 교수 대시보드</CardTitle>
           <CardDescription>
             이중 인증 스마트 출결 시스템 — 교수 로그인
           </CardDescription>

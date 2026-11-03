@@ -48,6 +48,11 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      boxShadow: {
+        soft: "0 2px 8px -2px rgba(30, 41, 59, 0.06), 0 1px 3px -1px rgba(30, 41, 59, 0.04)",
+        "soft-md": "0 4px 16px -4px rgba(30, 41, 59, 0.08), 0 2px 6px -2px rgba(30, 41, 59, 0.04)",
+        "soft-lg": "0 8px 32px -8px rgba(30, 41, 59, 0.10), 0 4px 12px -4px rgba(30, 41, 59, 0.05)",
+      },
     },
   },
   plugins: [],

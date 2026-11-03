@@ -4,32 +4,35 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    /* Soft Campus palette — warm tinted ground, softer slate text, rounder
+       surfaces, soft layered shadows. Inspired by campus portal aesthetics:
+       friendly and approachable while staying clean and legible. */
+    --background: 230 25% 97%;          /* #F6F8FC warm light blue-gray ground */
+    --foreground: 215 28% 17%;          /* #1E293B slate-800, softer than gray */
+    --card: 0 0% 100%;                  /* #FFFFFF pure white cards float on ground */
+    --card-foreground: 215 28% 17%;
 
-    --primary: 243 75% 59%;            /* indigo #4F46E5 */
-    --primary-foreground: 210 40% 98%;
+    --primary: 239 84% 67%;             /* #6366F1 indigo-500, softer accent */
+    --primary-foreground: 0 0% 100%;    /* white-on-primary */
 
-    --secondary: 210 40% 98%;
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 98%;
-    --muted-foreground: 215 16% 47%;
-    --accent: 243 100% 97%;            /* indigo subtle #EEF2FF */
-    --accent-foreground: 243 75% 59%;
+    --secondary: 210 40% 96%;           /* #F1F5F9 slate-100 */
+    --secondary-foreground: 215 28% 17%;
+    --muted: 210 40% 96%;               /* #F1F5F9 */
+    --muted-foreground: 215 16% 47%;    /* #64748B slate-500 */
+    --accent: 239 84% 94%;              /* #E8EAFE indigo subtle, slightly more visible */
+    --accent-foreground: 239 84% 67%;
 
-    --destructive: 0 84% 60%;          /* danger */
-    --destructive-foreground: 210 40% 98%;
-    --warning: 38 92% 50%;             /* warning */
+    --destructive: 0 84% 60%;           /* #EF4444 danger */
+    --destructive-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;              /* #F59E0B warning */
     --warning-foreground: 0 0% 100%;
-    --success: 142 71% 45%;            /* success #22C55E */
+    --success: 142 71% 45%;             /* #22C55E success */
     --success-foreground: 0 0% 100%;
 
-    --border: 214 32% 91%;
+    --border: 214 32% 91%;              /* #E2E8F0 hairline */
     --input: 214 32% 91%;
-    --ring: 243 75% 59%;               /* focus ring = indigo */
-    --radius: 0.5rem;
+    --ring: 239 84% 67%;                /* focus ring = primary */
+    --radius: 1rem;                     /* 16px — rounder, friendlier */
   }
 
   * {
@@ -39,7 +42,7 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-family: "Pretendard", system-ui, -apple-system, "Segoe UI", sans-serif;
   }
 }
 

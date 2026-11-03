@@ -12,6 +12,8 @@ interface SessionState {
   token: SessionToken | null;
   error: string | null;
   pollTimer: ReturnType<typeof setInterval> | null;
+  // 결석자 검토 팝업: 세션 닫기 또는 인증 창 만료(0s) 시 자동 오픈.
+  reviewOpen: boolean;
 
   openSession: (courseId: string, windowSeconds?: number) => Promise<Session | null>;
   extend: (addSeconds?: number) => Promise<void>;
@@ -19,6 +21,8 @@ interface SessionState {
   refreshToken: () => Promise<void>;
   startTokenPolling: (intervalMs?: number) => void;
   stopTokenPolling: () => void;
+  openReview: () => void;
+  closeReview: () => void;
   reset: () => void;
 }
 
@@ -31,6 +35,7 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   token: null,
   error: null,
   pollTimer: null,
+  reviewOpen: false,
 
   openSession: async (courseId, windowSeconds = 60) => {
     set({ error: null });
@@ -62,7 +67,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     get().stopTokenPolling();
     try {
       const session = await apiClose(s.session_id);
-      set({ session });
+      // 세션 닫기 → 결석자 검토 팝업 자동 오픈.
+      set({ session, reviewOpen: true });
     } catch (e) {
       set({ error: toMessage(e) });
     }
@@ -103,8 +109,11 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     set({ pollTimer: null });
   },
 
+  openReview: () => set({ reviewOpen: true }),
+  closeReview: () => set({ reviewOpen: false }),
+
   reset: () => {
     get().stopTokenPolling();
-    set({ session: null, token: null, error: null });
+    set({ session: null, token: null, error: null, reviewOpen: false });
   },
 }));

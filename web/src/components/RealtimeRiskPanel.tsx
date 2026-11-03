@@ -89,7 +89,7 @@ export function RealtimeRiskPanel() {
             <Skeleton className="h-12 w-full" />
             <div className="grid grid-cols-3 gap-3">
               {[0, 1, 2].map((i) => (
-                <div key={i} className="rounded-lg border p-3">
+                <div key={i} className="rounded-xl border border-border/60 bg-muted/30 p-3">
                   <Skeleton className="mx-auto h-6 w-10" />
                   <Skeleton className="mx-auto mt-2 h-3 w-12" />
                 </div>
@@ -100,15 +100,17 @@ export function RealtimeRiskPanel() {
           <>
             <div
               className={
-                "flex items-start gap-2 rounded-lg border p-3 text-sm " +
+                "flex items-start gap-3 rounded-xl border p-3.5 text-sm " +
                 (risk.level === "danger"
-                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                  ? "border-destructive/30 bg-destructive/10 text-destructive"
                   : risk.level === "warning"
-                    ? "border-warning/40 bg-warning/10 text-warning"
+                    ? "border-warning/30 bg-warning/10 text-warning"
                     : "border-success/30 bg-success/10 text-success")
               }
             >
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white/50">
+                <AlertTriangle className="h-4 w-4" />
+              </span>
               <span>
                 <span className="font-semibold">
                   {risk.level === "danger"
@@ -122,22 +124,22 @@ export function RealtimeRiskPanel() {
             </div>
 
             <div className="grid grid-cols-3 gap-3 text-center">
-              <div className="rounded-lg border p-4">
-                <div className="text-2xl font-semibold leading-none">
+              <div className="rounded-xl border border-border/60 bg-muted/30 p-4">
+                <div className="text-2xl font-bold leading-none">
                   <StatNumber value={total} />
                 </div>
                 <div className="mt-1.5 text-xs text-muted-foreground">전체</div>
               </div>
-              <div className="rounded-lg border p-4">
-                <div className="text-2xl font-semibold leading-none text-success">
+              <div className="rounded-xl border border-border/60 bg-success/5 p-4">
+                <div className="text-2xl font-bold leading-none text-success">
                   <StatNumber value={present} />
                 </div>
                 <div className="mt-1.5 text-xs text-muted-foreground">
                   실시간 출석
                 </div>
               </div>
-              <div className="rounded-lg border p-4">
-                <div className="text-2xl font-semibold leading-none text-warning">
+              <div className="rounded-xl border border-border/60 bg-warning/5 p-4">
+                <div className="text-2xl font-bold leading-none text-warning">
                   <StatNumber value={unverified} />
                 </div>
                 <div className="mt-1.5 text-xs text-muted-foreground">

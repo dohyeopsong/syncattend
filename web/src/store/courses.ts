@@ -46,12 +46,16 @@ function matchesQuery(
 
 interface CoursesState {
   courses: Course[];
+  // Currently-selected course (shared so the simulation panel, which lives on a
+  // separate nav page, can target the same course the professor picked).
+  selectedCourseId: string | null;
   enrollments: Record<string, Enrollment[]>; // by courseId
   loading: boolean;
   error: string | null;
   catalog: CourseCatalogItem[]; // latest search results
   catalogLoading: boolean;
   fetchCourses: () => Promise<void>;
+  setSelectedCourse: (courseId: string | null) => void;
   searchCatalog: (q: string, field?: SearchField) => Promise<void>;
   clearCatalog: () => void;
   addCourse: (payload: CreateCourseRequest) => Promise<Course | null>;
@@ -70,6 +74,7 @@ function toMessage(e: unknown): string {
 
 export const useCoursesStore = create<CoursesState>((set, get) => ({
   courses: [],
+  selectedCourseId: null,
   enrollments: {},
   loading: false,
   error: null,
@@ -85,6 +90,8 @@ export const useCoursesStore = create<CoursesState>((set, get) => ({
       set({ loading: false, error: toMessage(e) });
     }
   },
+
+  setSelectedCourse: (courseId) => set({ selectedCourseId: courseId }),
 
   // Debounced by the caller. Fetches a broad match from the backend (?q=),
   // then narrows client-side to the selected `field` (name / professor / code

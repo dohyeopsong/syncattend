@@ -29,32 +29,35 @@ export function StatCards() {
   const isLoading = !!session && !aggregate;
 
   const stats = [
-    { label: "출석", value: present, Icon: CheckCircle2, tone: "text-success" },
-    { label: "대기", value: pendingCorrections, Icon: Clock, tone: "text-warning" },
-    { label: "결석", value: absentCorrections, Icon: XCircle, tone: "text-destructive" },
+    { label: "출석", value: present, Icon: CheckCircle2, tone: "text-success", bg: "bg-success/10" },
+    { label: "대기", value: pendingCorrections, Icon: Clock, tone: "text-warning", bg: "bg-warning/10" },
+    { label: "결석", value: absentCorrections, Icon: XCircle, tone: "text-destructive", bg: "bg-destructive/10" },
     {
       label: "미인증",
       value: unverified,
       Icon: HelpCircle,
       tone: "text-muted-foreground",
+      bg: "bg-muted",
     },
   ];
 
   return (
     <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      {stats.map(({ label, value, Icon, tone }) => (
-        <Card key={label} className="p-5">
-          <div className="flex items-center justify-between">
+      {stats.map(({ label, value, Icon, tone, bg }) => (
+        <Card key={label} className="p-5 transition-shadow hover:shadow-soft-md">
+          <div className="flex items-center gap-3">
+            <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${bg}`}>
+              <Icon className={`h-5 w-5 shrink-0 ${tone}`} />
+            </div>
             <span className="text-sm font-medium text-muted-foreground">
               {label}
             </span>
-            <Icon className={`h-4 w-4 shrink-0 ${tone}`} />
           </div>
 
           {isLoading ? (
             <Skeleton className="mt-3 h-8 w-14" />
           ) : (
-            <div className="mt-2 text-2xl font-semibold tabular-nums leading-none">
+            <div className="mt-3 text-2xl font-bold tabular-nums leading-none">
               {session ? (
                 value
               ) : (

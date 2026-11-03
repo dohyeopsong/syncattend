@@ -64,7 +64,9 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
     const deltas: AttendanceDelta[] = Object.entries(get().pendingDeltas).map(
       ([student_id, status]) => ({ student_id, status }),
     );
-    if (deltas.length === 0) return true;
+    // Always call the endpoint — even with no explicit deltas, the backend
+    // auto-fails every unverified (pending) student to absent at close time
+    // ("대기 없음" policy). Skipping would leave pending students unverified.
     try {
       const aggregate = await apiBatch(sessionId, deltas);
       set({ aggregate, pendingDeltas: {} });
@@ -89,14 +91,24 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
     get().unsubscribeSse();
     try {
       const es = new EventSource(sseSessionUrl(sessionId));
-      es.onmessage = (ev) => {
+      // The server emits a NAMED event ("event: attendance"), NOT a default
+      // message event. EventSource.onmessage only fires for unnamed/default
+      // events, so we MUST listen on the named channel — otherwise the
+      // connection opens but the aggregate never updates and the realtime
+      // panel stays empty for the whole open session. Keep onmessage too as a
+      // fallback for any unnamed frame.
+      const apply = (raw: string) => {
         try {
-          const data = JSON.parse(ev.data) as AttendanceAggregate;
+          const data = JSON.parse(raw) as AttendanceAggregate;
           set({ aggregate: data });
         } catch {
           // ignore malformed frame
         }
       };
+      es.addEventListener("attendance", (ev) =>
+        apply((ev as MessageEvent).data),
+      );
+      es.onmessage = (ev) => apply(ev.data);
       es.onopen = () => set({ sseConnected: true });
       es.onerror = () => set({ sseConnected: false });
       set({ eventSource: es });

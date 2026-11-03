@@ -478,6 +478,7 @@ export function CoursePanel() {
   // owned by mobile (B), so no enroll button/input is exposed here.
   const enrollments = useCoursesStore((s) => s.enrollments);
   const fetchEnrollments = useCoursesStore((s) => s.fetchEnrollments);
+  const setSelectedCourse = useCoursesStore((s) => s.setSelectedCourse);
 
   const session = useSessionStore((s) => s.session);
   const openSession = useSessionStore((s) => s.openSession);
@@ -485,6 +486,9 @@ export function CoursePanel() {
   const resetAttendance = useAttendanceStore((s) => s.reset);
 
   const [selected, setSelected] = useState<string>("");
+  // Roster visibility is a separate toggle from course selection: clicking a
+  // different course shows its roster; clicking the same course again hides it.
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [windowSeconds, setWindowSeconds] = useState(60);
 
   const [showAdd, setShowAdd] = useState(false);
@@ -507,9 +511,6 @@ export function CoursePanel() {
     [courses, selected],
   );
 
-  // Read-only roster for the selected course.
-  const roster = selected ? enrollments[selected] : undefined;
-
   useEffect(() => {
     void fetchCourses();
   }, [fetchCourses]);
@@ -517,6 +518,12 @@ export function CoursePanel() {
   useEffect(() => {
     if (!selected && courses.length > 0) setSelected(courses[0].id);
   }, [courses, selected]);
+
+  // Keep the shared selectedCourseId in the store in sync so the simulation
+  // panel (on a separate nav page) targets the same course the professor picked.
+  useEffect(() => {
+    setSelectedCourse(selected || null);
+  }, [selected, setSelectedCourse]);
 
   // Close the add-course modal on Escape.
   useEffect(() => {
@@ -653,97 +660,115 @@ export function CoursePanel() {
                       </div>
                     </form>
                   ) : (
-                    <div className="flex items-start justify-between gap-3">
-                      <button
-                        type="button"
-                        className="flex-1 text-left"
-                        onClick={() => setSelected(c.id)}
-                        aria-pressed={isSelected}
-                      >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-medium">{c.name}</span>
-                          {isSelected && (
-                            <Badge variant="default">선택됨</Badge>
-                          )}
-                          {c.code && (
-                            <Badge variant="outline">{c.code}</Badge>
-                          )}
-                        </div>
-                        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                          {c.department && <span>{c.department}</span>}
-                          <span>{scheduleLabel(c)}</span>
-                          {c.location && <span>{c.location}</span>}
-                          {c.credits != null && <span>{c.credits}학점</span>}
-                          {c.professor_name && <span>{c.professor_name}</span>}
-                        </div>
-                      </button>
-                      <div className="flex shrink-0 gap-1">
-                        <Button
+                    <>
+                      <div className="flex items-start justify-between gap-3">
+                        <button
                           type="button"
-                          size="icon"
-                          variant="ghost"
-                          aria-label="강좌 수정"
-                          onClick={() => startEdit(c)}
-                          disabled={busy}
+                          className="flex-1 text-left"
+                          onClick={() => {
+                            if (c.id === selected) {
+                              // Same course clicked again → toggle roster closed.
+                              setRosterOpen((v) => !v);
+                            } else {
+                              // Different course → select it and show its roster.
+                              setSelected(c.id);
+                              setRosterOpen(true);
+                            }
+                          }}
+                          aria-pressed={isSelected}
                         >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          type="button"
-                          size="icon"
-                          variant="ghost"
-                          aria-label="강좌 삭제"
-                          className="text-destructive hover:text-destructive"
-                          onClick={() => void onDelete(c)}
-                          disabled={busy}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-medium">{c.name}</span>
+                            {isSelected && (
+                              <Badge variant="default">선택됨</Badge>
+                            )}
+                            {c.code && (
+                              <Badge variant="outline">{c.code}</Badge>
+                            )}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                            {c.department && <span>{c.department}</span>}
+                            <span>{scheduleLabel(c)}</span>
+                            {c.location && <span>{c.location}</span>}
+                            {c.credits != null && <span>{c.credits}학점</span>}
+                            {c.professor_name && <span>{c.professor_name}</span>}
+                          </div>
+                        </button>
+                        <div className="flex shrink-0 gap-1">
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            aria-label="강좌 수정"
+                            onClick={() => startEdit(c)}
+                            disabled={busy}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            variant="ghost"
+                            aria-label="강좌 삭제"
+                            className="text-destructive hover:text-destructive"
+                            onClick={() => void onDelete(c)}
+                            disabled={busy}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
+
+                      {/* Roster expands inline under this course (강의1 → 명단 → 강의2). */}
+                      {isSelected && rosterOpen && (
+                        <div className="mt-3 space-y-2 rounded-xl border border-border/60 bg-muted/30 p-3">
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-2 text-sm font-medium">
+                              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                <Users className="h-4 w-4" />
+                              </span>
+                              수강생
+                              <Badge variant="secondary">
+                                {enrollments[c.id]
+                                  ? `${enrollments[c.id]!.length}명`
+                                  : "…"}
+                              </Badge>
+                            </span>
+                            <span className="text-[11px] text-muted-foreground">
+                              조회 전용 · 수강신청은 학생 앱에서
+                            </span>
+                          </div>
+                          {!enrollments[c.id] ? (
+                            <p className="text-xs text-muted-foreground">
+                              불러오는 중…
+                            </p>
+                          ) : enrollments[c.id]!.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">
+                              아직 수강생이 없습니다.
+                            </p>
+                          ) : (
+                            <ul className="flex flex-wrap gap-1.5">
+                              {enrollments[c.id]!.map((e) => (
+                                <li key={e.student_id}>
+                                  <Badge variant="outline" className="font-mono">
+                                    {/* Prefer the school student number (joined
+                                        from the user); bots surface as
+                                        "SIMbot…". Fall back to the user id. */}
+                                    {e.student_number ?? e.student_id}
+                                  </Badge>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </li>
               );
             })}
           </ul>
         </div>
-
-        {/* ---- enrolled students (read-only) ---- */}
-        {selectedCourse && (
-          <div className="space-y-2 rounded-xl border border-border/60 bg-muted/30 p-3">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-sm font-medium">
-                <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Users className="h-4 w-4" />
-                </span>
-                수강생
-                <Badge variant="secondary">
-                  {roster ? `${roster.length}명` : "…"}
-                </Badge>
-              </span>
-              <span className="text-[11px] text-muted-foreground">
-                조회 전용 · 수강신청은 학생 앱에서
-              </span>
-            </div>
-            {roster === undefined ? (
-              <p className="text-xs text-muted-foreground">불러오는 중…</p>
-            ) : roster.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
-                아직 수강생이 없습니다.
-              </p>
-            ) : (
-              <ul className="flex flex-wrap gap-1.5">
-                {roster.map((e) => (
-                  <li key={e.student_id}>
-                    <Badge variant="outline" className="font-mono">
-                      {e.student_id}
-                    </Badge>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
 
         {/* ---- add form (modal) ---- */}
         {showAdd && (

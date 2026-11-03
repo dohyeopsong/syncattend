@@ -7,6 +7,8 @@ import type { AttendanceAggregate, AttendanceStatus } from "@/api/types";
 // RealtimeRiskPanel). These tests lock the values to the exact formulas the
 // panels used before consolidation, so the "regression 0" guarantee holds.
 
+// Helper: build an aggregate whose unverified list is a set of student ids,
+// expanded into the UnverifiedStudent object shape the API now returns.
 const agg = (
   total: number,
   present: number,
@@ -15,7 +17,8 @@ const agg = (
   session_id: "sess-1",
   total,
   present,
-  unverified,
+  absent: 0,
+  unverified: unverified.map((student_id) => ({ student_id })),
 });
 
 describe("deriveAttendanceStats", () => {
@@ -27,10 +30,15 @@ describe("deriveAttendanceStats", () => {
       unverified: 0,
       pendingCorrections: 0,
       absentCorrections: 0,
+      presentFinal: 0,
+      absentFinal: 0,
+      unverifiedFinal: 0,
       presentShare: 0,
       unverifiedShare: 0,
       presentRate: 0,
       unverifiedRate: 0,
+      absentFinalRate: 0,
+      unverifiedFinalRate: 0,
     });
   });
 
@@ -80,5 +88,21 @@ describe("deriveAttendanceStats", () => {
     const s = deriveAttendanceStats(agg(2, 2, []));
     expect(s.pendingCorrections).toBe(0);
     expect(s.absentCorrections).toBe(0);
+  });
+
+  it("live tiles move unverified students to present/absent in real time", () => {
+    // 5 enrolled, 1 verified on server, 4 unverified. Professor marks one of the
+    // unverified present and another absent → those move out of 미인증 live.
+    const deltas: Record<string, AttendanceStatus> = {
+      "stu-2": "present",
+      "stu-3": "absent",
+    };
+    const s = deriveAttendanceStats(agg(5, 1, ["stu-2", "stu-3", "stu-4", "stu-5"]), deltas);
+    expect(s.presentFinal).toBe(2); // 1 server + 1 marked
+    expect(s.absentFinal).toBe(1);
+    expect(s.unverifiedFinal).toBe(2); // 4 - 1 present - 1 absent
+    expect(s.presentRate).toBe(40); // 2/5
+    expect(s.absentFinalRate).toBe(20); // 1/5
+    expect(s.unverifiedFinalRate).toBe(40); // 2/5
   });
 });
