@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/design.dart';
-import '../../core/config.dart';
 import '../../models/contract_models.dart';
 import 'attendance_controller.dart';
 import 'permissions_service.dart';
@@ -185,47 +184,29 @@ class _AttendanceVerifyScreenState
           SafeArea(
             child: Column(
               children: [
-                // Upper region: the status/outcome ring, aligned with the
-                // reticle window while capturing.
-                Expanded(
-                  child: Center(
-                    child: _CountdownRing(
-                      phase: state.phase,
-                      result: state.result,
+                // Upper region: left empty while capturing so the QR reticle
+                // window stays fully visible; the result fills it once done.
+                if (state.phase != VerifyPhase.capturing)
+                  Expanded(
+                    child: Center(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
+                        child: _ResultPanel(state: state, onRetry: _retry),
+                      ),
+                    ),
+                  )
+                else
+                  const Spacer(),
+                // Lower region: 3-layer defense step indicator only while
+                // capturing (QR 인식 → 음향 수신 → 서버 검증).
+                if (state.phase == VerifyPhase.capturing)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                    child: _DefenseSteps(
+                      state: state,
+                      audioPulse: !state.hasAudio ? _pulse : null,
                     ),
                   ),
-                ),
-                // Lower region: auth-window countdown + 3-layer defense step
-                // indicator + result panel (scrollable).
-                SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Visual countdown for the 1-minute auth window (display
-                      // only — the controller owns the timer/state).
-                      if (state.phase == VerifyPhase.capturing)
-                        _WindowCountdown(
-                          secondsRemaining: state.secondsRemaining,
-                          totalSeconds: AppConfig.defaultWindowSeconds,
-                        ),
-                      if (state.phase == VerifyPhase.capturing)
-                        const SizedBox(height: 16),
-                      // 3-layer defense: QR 인식 → 음향 수신 → 서버 검증. Each step
-                      // flips gray → green as its signal is captured/verified,
-                      // making the "3계층 방어" visible during the demo.
-                      _DefenseSteps(
-                        state: state,
-                        audioPulse: (state.phase == VerifyPhase.capturing &&
-                                !state.hasAudio)
-                            ? _pulse
-                            : null,
-                      ),
-                      const SizedBox(height: 20),
-                      _ResultPanel(state: state, onRetry: _retry),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
@@ -276,7 +257,7 @@ class _ReticlePainter extends CustomPainter {
 
     // Indigo corner markers.
     final markerPaint = Paint()
-      ..color = const Color(0xFF4F46E5)
+      ..color = AppColors.indigo
       ..style = PaintingStyle.stroke
       ..strokeWidth = cornerStroke
       ..strokeCap = StrokeCap.round;
@@ -313,194 +294,6 @@ class _ReticlePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ReticlePainter oldDelegate) => false;
-}
-
-/// Large center status ring. While capturing it shows an INDETERMINATE spinner
-/// ("인증 대기 중") — no numeric countdown (the local timer was UX-only and the
-/// server owns the real window). When done it morphs into the outcome ring
-/// (green check on success, amber refresh on failure — never red "absent").
-class _CountdownRing extends StatelessWidget {
-  const _CountdownRing({
-    required this.phase,
-    required this.result,
-  });
-
-  final VerifyPhase phase;
-  final VerifyResult? result;
-
-  @override
-  Widget build(BuildContext context) {
-    final done = phase == VerifyPhase.done;
-    final success = result?.status == VerifyStatus.present;
-    final submitting = phase == VerifyPhase.submitting;
-
-    Color ring;
-    Widget center;
-    bool indeterminate = false;
-    if (done && success) {
-      ring = AppColors.success;
-      center = const _RingCenter(
-        icon: Icons.check_circle,
-        color: AppColors.success,
-        label: '출석',
-        animateIcon: true,
-      );
-    } else if (done || phase == VerifyPhase.error) {
-      ring = AppColors.warning; // failure ≠ absent → amber, not red
-      center = const _RingCenter(
-        icon: Icons.refresh,
-        color: AppColors.warning,
-        label: '다시 시도',
-      );
-    } else if (submitting) {
-      ring = AppColors.indigo;
-      indeterminate = true;
-      center = const _RingCenter(
-        icon: Icons.hourglass_bottom,
-        color: AppColors.indigo,
-        label: '확인 중',
-      );
-    } else {
-      // Capturing / idle: STATIC ring (no spinner), NO number. A spinning
-      // indicator here read like an endless "loading" state; the screen is
-      // actually just waiting for QR + audio, so show a calm full ring.
-      ring = AppColors.indigo;
-      indeterminate = false;
-      center = const _RingCenter(
-        icon: Icons.qr_code_scanner,
-        color: AppColors.indigo,
-        label: '인증 대기 중',
-      );
-    }
-
-    return SizedBox(
-      width: 200,
-      height: 200,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          SizedBox(
-            width: 200,
-            height: 200,
-            child: CircularProgressIndicator(
-              // Indeterminate (spinning) while waiting/submitting; full ring
-              // once resolved.
-              value: indeterminate ? null : 1.0,
-              strokeWidth: 10,
-              backgroundColor: AppColors.border,
-              valueColor: AlwaysStoppedAnimation<Color>(ring),
-            ),
-          ),
-          center,
-        ],
-      ),
-    );
-  }
-}
-
-class _RingCenter extends StatelessWidget {
-  const _RingCenter({
-    this.icon,
-    required this.color,
-    required this.label,
-    this.animateIcon = false,
-  });
-
-  final IconData? icon;
-  final Color color;
-  final String label;
-  final bool animateIcon;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget? iconWidget;
-    if (icon != null) {
-      iconWidget = Icon(icon, size: 56, color: color);
-      if (animateIcon) {
-        // Subtle one-shot "pop" so a successful check feels satisfying without
-        // being flashy (guide: animations not overdone).
-        iconWidget = TweenAnimationBuilder<double>(
-          tween: Tween<double>(begin: 0.4, end: 1.0),
-          duration: const Duration(milliseconds: 450),
-          curve: Curves.elasticOut,
-          builder: (context, value, child) =>
-              Transform.scale(scale: value, child: child),
-          child: iconWidget,
-        );
-      }
-    }
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        if (iconWidget != null) iconWidget,
-        const SizedBox(height: 4),
-        Text(label,
-            style: const TextStyle(
-                fontSize: 14, color: AppColors.mutedForeground)),
-      ],
-    );
-  }
-}
-
-/// Visual countdown for the 1-minute auth window. Display-only: it renders the
-/// controller's [secondsRemaining] as a linear progress bar + MM:SS text. The
-/// bar turns amber in the final 10s to nudge the student. The controller owns
-/// the actual timer and state transitions.
-class _WindowCountdown extends StatelessWidget {
-  const _WindowCountdown({
-    required this.secondsRemaining,
-    required this.totalSeconds,
-  });
-
-  final int secondsRemaining;
-  final int totalSeconds;
-
-  @override
-  Widget build(BuildContext context) {
-    final total = totalSeconds <= 0 ? 1 : totalSeconds;
-    final remaining = secondsRemaining.clamp(0, total);
-    final fraction = remaining / total; // 1.0 → 0.0
-    final urgent = remaining <= 10;
-    final barColor = urgent ? AppColors.warning : AppColors.indigo;
-    final mm = (remaining ~/ 60).toString().padLeft(2, '0');
-    final ss = (remaining % 60).toString().padLeft(2, '0');
-    return Column(
-      children: [
-        Row(
-          children: [
-            Icon(urgent ? Icons.timer : Icons.timer_outlined,
-                size: 16, color: barColor),
-            const SizedBox(width: 6),
-            const Text('인증 창 남은 시간',
-                style: TextStyle(
-                    fontSize: 13, color: AppColors.mutedForeground)),
-            const Spacer(),
-            Text('$mm:$ss',
-                style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                    color: barColor)),
-          ],
-        ),
-        const SizedBox(height: 6),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: TweenAnimationBuilder<double>(
-            // Animate the shrink smoothly between the 1-second state ticks.
-            tween: Tween<double>(begin: fraction, end: fraction),
-            duration: const Duration(milliseconds: 400),
-            builder: (context, value, _) => LinearProgressIndicator(
-              value: value,
-              minHeight: 8,
-              backgroundColor: AppColors.border,
-              valueColor: AlwaysStoppedAnimation<Color>(barColor),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
 }
 
 /// The 3-layer defense visualizer: QR 인식 → 음향 수신 → 서버 검증. Each step is a
@@ -704,7 +497,8 @@ class _ResultPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final showRetry = shouldShowRetry(state);
-    return Card(
+    return Container(
+      decoration: softCardDecoration(),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -802,8 +596,8 @@ class _ResultDetail extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.warning.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
+              color: AppColors.badgeAmberBg,
+              borderRadius: BorderRadius.circular(12),
               border:
                   Border.all(color: AppColors.warning.withValues(alpha: 0.30)),
             ),
@@ -862,7 +656,17 @@ class _PermissionFallback extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.mic_off, size: 56),
+              Container(
+                width: 72,
+                height: 72,
+                decoration: const BoxDecoration(
+                  color: AppColors.badgeAmberBg,
+                  shape: BoxShape.circle,
+                  boxShadow: AppColors.shadowSoft,
+                ),
+                child: const Icon(Icons.mic_off,
+                    size: 36, color: AppColors.warning),
+              ),
               const SizedBox(height: 16),
               const Text(
                 '출석 인증에는 카메라(QR)와 마이크(음향 토큰) 권한이 필요합니다.\n'

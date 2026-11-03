@@ -16,8 +16,9 @@ class _IconBadge extends StatelessWidget {
       width: 72,
       height: 72,
       decoration: const BoxDecoration(
-        color: AppColors.indigoSubtle,
+        color: AppColors.badgeIndigoBg,
         shape: BoxShape.circle,
+        boxShadow: AppColors.shadowSoft,
       ),
       child: Icon(icon, size: 36, color: AppColors.indigo),
     );
@@ -36,9 +37,9 @@ class _ErrorNotice extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.danger.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+        color: AppColors.badgeRedBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -121,6 +122,18 @@ class DeviceRegistrationScreen extends ConsumerWidget {
                             )
                           : const Text('기기 등록 다시 시도'),
                     ),
+                  ),
+                  const SizedBox(height: 12),
+                  // When the UUID is bound to a different account, surface a
+                  // clear "re-register" link instead of silently looping.
+                  TextButton.icon(
+                    onPressed: auth.busy
+                        ? null
+                        : () => ref
+                            .read(authControllerProvider.notifier)
+                            .goToReauth(),
+                    icon: const Icon(Icons.phonelink_setup, size: 18),
+                    label: const Text('다른 이메일로 기기 재등록하기'),
                   ),
                 ],
               ),
@@ -241,7 +254,7 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
                   const Center(child: _IconBadge(Icons.phonelink_setup)),
                   const SizedBox(height: 24),
                   const Text(
-                    '기기 변경이 감지되었습니다',
+                    '등록된 계정과 일치하지 않습니다',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontSize: 18,
@@ -251,11 +264,14 @@ class _DeviceReauthScreenState extends ConsumerState<DeviceReauthScreen> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    '다른 기기(또는 새 UUID)가 감지되었습니다. 학교 이메일'
-                    '(@wku.ac.kr)로 인증 후 이 기기로 재바인딩합니다.',
+                    '이 기기(UUID)가 다른 계정에 묶여 있습니다. 바인딩하려는 '
+                    '학교 이메일(@wku.ac.kr)로 인증하면, 기존 묶임은 해제되고 '
+                    '인증한 이메일 계정으로 이 기기가 재등록됩니다.\n\n'
+                    '• 이미 가입된 이메일 → 그 계정으로 기기 재바인딩\n'
+                    '• 새 이메일 → 인증 후 새 계정 생성 + 기기 바인딩',
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       height: 1.5,
                       color: AppColors.mutedForeground,
                     ),

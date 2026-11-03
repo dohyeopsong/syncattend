@@ -15,9 +15,15 @@ class DioApiClient implements ApiClient {
       : _dio = dio ??
             Dio(BaseOptions(
               baseUrl: AppConfig.backendBaseUrl,
-              connectTimeout: const Duration(seconds: 10),
-              receiveTimeout: const Duration(seconds: 15),
-              headers: {'Content-Type': 'application/json'},
+              connectTimeout: const Duration(seconds: 20),
+              receiveTimeout: const Duration(seconds: 30),
+              headers: {
+                'Content-Type': 'application/json',
+                // ngrok free tier returns an interstitial "Visit Site" page
+                // for browser-like requests; this header skips it so the app's
+                // HTTP calls reach the backend directly.
+                'ngrok-skip-browser-warning': 'true',
+              },
             )) {
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
@@ -28,6 +34,23 @@ class DioApiClient implements ApiClient {
         handler.next(options);
       },
       onError: (e, handler) async {
+        // ngrok free tier over mobile networks intermittently drops the
+        // connection before the response header arrives ("Connection closed
+        // before full header was received"). Retry once on connection errors
+        // that are NOT 4xx/5xx HTTP responses (those have a status code).
+        final isConnError = e.type == DioExceptionType.connectionError ||
+            e.type == DioExceptionType.receiveTimeout ||
+            e.type == DioExceptionType.connectionTimeout;
+        if (isConnError && !_retried) {
+          _retried = true;
+          try {
+            final clone = await _dio.fetch(e.requestOptions);
+            return handler.resolve(clone);
+          } catch (_) {
+            _retried = false;
+            // fall through to original error
+          }
+        }
         if (e.response?.statusCode == 401 && !_retried) {
           _retried = true;
           final refreshed = await _tryRefresh();
@@ -85,9 +108,61 @@ class DioApiClient implements ApiClient {
   Future<TokenPair> login(
       {required String email, required String password}) async {
     try {
+      // The mobile app is student-only; the web dashboard is professor-only.
+      // Declare the client type so the backend can reject a role mismatch
+      // (e.g. a professor logging into the app) at the source.
       final res = await _dio.post('/auth/login',
-          data: {'email': email, 'password': password});
+          data: {'email': email, 'password': password},
+          options: Options(headers: {'X-Client-Type': 'mobile'}));
       return TokenPair.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<VerifyCodeResult> sendSignupCode(String email) async {
+    try {
+      final res = await _dio.post('/auth/send-code', data: {'email': email});
+      return VerifyCodeResult.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<VerifyCodeResult> verifySignupCode({
+    required String email,
+    required String code,
+  }) async {
+    try {
+      final res = await _dio.post('/auth/verify-code', data: {
+        'email': email,
+        'code': code,
+      });
+      return VerifyCodeResult.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
+  Future<UserOut> register({
+    required String email,
+    required String password,
+    required Role role,
+    String? name,
+    String? studentId,
+  }) async {
+    try {
+      final res = await _dio.post('/auth/register', data: {
+        'email': email,
+        'password': password,
+        'role': role.name,
+        if (name != null) 'name': name,
+        if (studentId != null) 'student_id': studentId,
+      });
+      return UserOut.fromJson(res.data as Map<String, dynamic>);
     } on DioException catch (e) {
       _rethrowAsApiError(e);
     }

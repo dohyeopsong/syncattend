@@ -308,18 +308,37 @@ class UserOut {
     required this.email,
     required this.role,
     this.name,
+    this.studentId,
   });
 
   final String id;
   final String email;
   final Role role;
   final String? name;
+  /// 학번. Present for students, null for professors.
+  final String? studentId;
 
   factory UserOut.fromJson(Map<String, dynamic> json) => UserOut(
         id: json['id'] as String? ?? '',
         email: json['email'] as String? ?? '',
         role: _roleFromString(json['role'] as String?),
         name: json['name'] as String?,
+        studentId: json['student_id'] as String?,
+      );
+}
+
+/// #/components/schemas/VerifyCodeResult — result of /auth/send-code and
+/// /auth/verify-code (team member's signup email-verification flow).
+class VerifyCodeResult {
+  const VerifyCodeResult({required this.verified, required this.message});
+
+  final bool verified;
+  final String message;
+
+  factory VerifyCodeResult.fromJson(Map<String, dynamic> json) =>
+      VerifyCodeResult(
+        verified: json['verified'] as bool? ?? false,
+        message: json['message'] as String? ?? '',
       );
 }
 
@@ -332,6 +351,7 @@ class MyAttendanceItem {
     required this.courseId,
     required this.courseName,
     required this.status,
+    this.weekNumber,
     this.verifiedAt,
     this.sessionOpenedAt,
   });
@@ -340,6 +360,7 @@ class MyAttendanceItem {
   final String sessionId;
   final String courseId;
   final String courseName;
+  final int? weekNumber; // 1..15주차 (nullable for legacy sessions)
   final AttendanceStatus status;
   final DateTime? verifiedAt;
   final DateTime? sessionOpenedAt;
@@ -350,6 +371,7 @@ class MyAttendanceItem {
         sessionId: json['session_id'] as String? ?? '',
         courseId: json['course_id'] as String? ?? '',
         courseName: json['course_name'] as String? ?? '',
+        weekNumber: json['week_number'] as int?,
         status: attendanceStatusFromString(json['status'] as String?),
         verifiedAt: json['verified_at'] != null
             ? DateTime.tryParse(json['verified_at'] as String)
@@ -381,6 +403,7 @@ class Course {
     required this.location,
     required this.credits,
     this.enrolled = false,
+    this.hasSchedule = true,
   });
 
   final String id;
@@ -389,7 +412,9 @@ class Course {
   final String department;
   final String professorName;
 
-  /// ISO-ish weekday: 1=Mon, 2=Tue, ... 7=Sun (matches DateTime.weekday).
+  /// Internal weekday: 1=Mon, 2=Tue, ... 7=Sun (matches DateTime.weekday).
+  /// Normalized from the contract's 0=Mon..6=Sun in [fromJson]. Defaults to 1
+  /// when the backend omits it; use [hasSchedule] to tell those apart.
   final int dayOfWeek;
 
   /// Inclusive class-period range (1..N). A single-period class has
@@ -402,6 +427,12 @@ class Course {
 
   /// True when the authenticated student is enrolled in this course.
   final bool enrolled;
+
+  /// True only when the backend supplied a real day + period range. Legacy /
+  /// ad-hoc courses created without timetable metadata have this false and are
+  /// listed in the catalog but NOT placed on the grid (they would otherwise all
+  /// stack on Mon 1교시).
+  final bool hasSchedule;
 
   /// Number of periods this course spans (>= 1).
   int get periodSpan =>
@@ -419,24 +450,35 @@ class Course {
         location: location,
         credits: credits,
         enrolled: enrolled ?? this.enrolled,
+        hasSchedule: hasSchedule,
       );
 
-  factory Course.fromJson(Map<String, dynamic> json) => Course(
-        id: json['id'] as String? ?? '',
-        code: json['code'] as String? ?? '',
-        name: json['name'] as String? ?? '',
-        department: json['department'] as String? ?? '',
-        professorName:
-            json['professor_name'] as String? ?? json['professor'] as String? ?? '',
-        dayOfWeek: (json['day_of_week'] as num?)?.toInt() ?? 1,
-        startPeriod: (json['start_period'] as num?)?.toInt() ?? 1,
-        endPeriod: (json['end_period'] as num?)?.toInt() ??
-            (json['start_period'] as num?)?.toInt() ??
-            1,
-        location: json['location'] as String? ?? '',
-        credits: (json['credits'] as num?)?.toInt() ?? 0,
-        enrolled: json['enrolled'] as bool? ?? false,
-      );
+  factory Course.fromJson(Map<String, dynamic> json) {
+    final dow = (json['day_of_week'] as num?)?.toInt();
+    final sp = (json['start_period'] as num?)?.toInt();
+    final ep = (json['end_period'] as num?)?.toInt();
+    // Contract stores day_of_week as 0=Mon..6=Sun; normalize to internal
+    // 1=Mon..7=Sun (DateTime.weekday). A course is "scheduled" only when all
+    // three are present and well-formed; otherwise it is listed but not gridded.
+    final dowValid = dow != null && dow >= 0 && dow <= 6;
+    final spValid = sp != null && sp >= 1;
+    final epValid = ep != null && sp != null && ep >= sp;
+    return Course(
+      id: json['id'] as String? ?? '',
+      code: json['code'] as String? ?? '',
+      name: json['name'] as String? ?? '',
+      department: json['department'] as String? ?? '',
+      professorName:
+          json['professor_name'] as String? ?? json['professor'] as String? ?? '',
+      dayOfWeek: dowValid ? dow + 1 : 1,
+      startPeriod: sp ?? 1,
+      endPeriod: ep ?? sp ?? 1,
+      location: json['location'] as String? ?? '',
+      credits: (json['credits'] as num?)?.toInt() ?? 0,
+      enrolled: json['enrolled'] as bool? ?? false,
+      hasSchedule: dowValid && spValid && epValid,
+    );
+  }
 }
 
 /// Korean single-char weekday label for a 1=Mon..7=Sun value ('?' if invalid).

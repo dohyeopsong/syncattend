@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'core/design.dart';
 import 'features/auth/auth_controller.dart';
 import 'features/auth/device_screens.dart';
 import 'features/auth/login_screen.dart';
@@ -16,28 +17,62 @@ class SyncattendApp extends StatelessWidget {
     return MaterialApp(
       title: 'Syncattend',
       debugShowCheckedModeBanner: false,
-      // Clean-minimal design guide §4 (docs/06a_DESIGN_GUIDE_minimal.md):
-      // single indigo accent (#4F46E5) shared with the web, white base,
-      // elevation-0 cards with a hairline border + 12px radius, flat white AppBar.
+      // Soft Campus design — warm tinted ground, softer indigo accent (#6366F1)
+      // shared with the web, white floating cards with soft shadow + 16px
+      // radius, flat white AppBar. Matches web index.css :root tokens.
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF4F46E5), // same indigo as web
+          seedColor: const Color(0xFF6366F1), // softer indigo, same as web
           brightness: Brightness.light,
         ),
-        scaffoldBackgroundColor: const Color(0xFFFFFFFF),
+        scaffoldBackgroundColor: AppColors.mutedBg, // warm tinted ground
         cardTheme: CardThemeData(
           elevation: 0,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: Color(0xFFE5E7EB)), // hairline border
+            borderRadius: BorderRadius.circular(16), // rounder, friendlier
+            side: BorderSide(
+              color: AppColors.border.withValues(alpha: 0.6),
+            ),
           ),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.white,
-          foregroundColor: Color(0xFF111827),
+          foregroundColor: AppColors.foreground,
           elevation: 0,
           scrolledUnderElevation: 0.5,
+        ),
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: AppColors.indigo,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+            textStyle: const TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: AppColors.indigo, width: 1.5),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
         ),
       ),
       home: const _RootRouter(),

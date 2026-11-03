@@ -85,13 +85,29 @@ class AttendanceController extends StateNotifier<AttendanceState> {
   Timer? _countdown;
   StreamSubscription<String>? _audioSub;
 
+  /// Max auto-retries on cross_verify_failed. One retry is enough: the first
+  /// attempt may fail when the QR just rotated (the 510ms audio decode latency
+  /// means a nonce decoded right after rotation can be from the PREVIOUS
+  /// rotation's emission). Restarting the mic gives a fresh nonce aligned with
+  /// the current rotation, and the QR is still valid (15s TTL ≫ 5s rotation).
+  static const int _maxCrossVerifyRetries = 1;
+  int _crossVerifyRetries = 0;
+
   /// Starts the 1-minute auth-window countdown and begins microphone decode.
   Future<void> startCapture() async {
+    _crossVerifyRetries = 0;
     state = const AttendanceState(
       phase: VerifyPhase.capturing,
       secondsRemaining: AppConfig.defaultWindowSeconds,
     );
     _startCountdown();
+    await _startAudioCapture();
+  }
+
+  /// Starts (or restarts) microphone capture and wires the nonce listener.
+  /// Extracted from [startCapture] so the cross-verify retry path can restart
+  /// audio WITHOUT resetting the QR or countdown.
+  Future<void> _startAudioCapture() async {
     try {
       final nonces = await _audio.start();
       _audioSub = nonces.listen((nonce) {
@@ -118,6 +134,14 @@ class AttendanceController extends StateNotifier<AttendanceState> {
       sessionId = parts.first;
       qr = parts.length > 1 ? parts[1] : '';
     }
+    // Keep the already-decoded audioNonce. Clearing it here (the old behaviour)
+    // forced a re-decode AFTER the QR scan; if the token rotated during that
+    // gap the fresh nonce belonged to a different rotation than the scanned QR
+    // → cross_verify_failed (409). Since the mic stream is continuous and a
+    // freshly decoded nonce is aligned with whatever the emitter is currently
+    // broadcasting, keeping it lets QR+audio be captured SIMULTANEOUSLY and
+    // usually from the same rotation window. Both can arrive in either order;
+    // _maybeSubmit fires submit as soon as both are present.
     state = state.copyWith(qrToken: qr, sessionId: sessionId);
     _maybeSubmit();
   }
@@ -164,6 +188,28 @@ class AttendanceController extends StateNotifier<AttendanceState> {
         audioNonce: state.audioNonce!,
         deviceUuid: uuid,
       ));
+
+      // Auto-retry on cross_verify_failed: the audio nonce was likely decoded
+      // from the PREVIOUS rotation's emission. The 510ms decode latency (9
+      // symbols × 60ms − 30ms overlap) means a nonce decoded right after QR
+      // rotation can be stale. Restart mic capture to get a fresh nonce; the
+      // QR is still valid (15s TTL ≫ 5s rotation). Only retry once — a second
+      // failure means the student should re-scan or the window may be closing.
+      if (result.status == VerifyStatus.rejected &&
+          result.reason == VerifyReason.crossVerifyFailed &&
+          _crossVerifyRetries < _maxCrossVerifyRetries) {
+        _crossVerifyRetries++;
+        state = state.copyWith(
+          phase: VerifyPhase.capturing,
+          audioNonce: null,
+          result: null,
+          error: null,
+        );
+        _startCountdown();
+        await _startAudioCapture();
+        return;
+      }
+
       state = state.copyWith(phase: VerifyPhase.done, result: result);
     } on ApiError catch (e) {
       state = state.copyWith(phase: VerifyPhase.error, error: e.detail);
@@ -184,6 +230,7 @@ class AttendanceController extends StateNotifier<AttendanceState> {
   /// so "다시 시도" appeared to do nothing — this is the one the UI must call.
   Future<void> restart() async {
     await reset();
+    _crossVerifyRetries = 0;
     await startCapture();
   }
 

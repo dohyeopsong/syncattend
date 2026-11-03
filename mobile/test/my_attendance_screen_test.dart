@@ -1,28 +1,31 @@
-// Widget tests for MyAttendanceScreen (GET /me/attendance rendering):
-//  - the loaded history renders one row per record with its course name and a
-//    Korean status badge (present/absent/pending) — status is never colour-only;
-//  - a failed load surfaces the error affordance with a "다시 시도" retry.
-//
-// Driven through the real myAttendanceProvider with an injected fake ApiClient
-// so the widget exercises the same async.when() branches the device does.
+// Widget tests for the "내 출결" first page + per-course attendance bottom sheet:
+//  - the first page lists enrolled courses as cards (main = course name,
+//    sub = code · schedule · professor · location);
+//  - tapping a card opens a draggable bottom sheet showing the course info
+//    header + a week×(출석/결석) table where a present week shows ✓ in the
+//    출석 column and an absent week shows ✗ in the 결석 column;
+//  - a failed course load surfaces the error affordance with "다시 시도" retry.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:syncattend_mobile/api/api_client.dart';
 import 'package:syncattend_mobile/api/mock_api_client.dart';
-import 'package:syncattend_mobile/core/design.dart';
 import 'package:syncattend_mobile/core/providers.dart';
 import 'package:syncattend_mobile/features/views/view_screens.dart';
 import 'package:syncattend_mobile/models/contract_models.dart';
 
-/// An ApiClient whose getMyAttendance always fails, to drive the error branch.
-/// All other methods delegate to MockApiClient (unused by this screen).
-class _FailingAttendanceApi extends MockApiClient {
+/// An ApiClient whose getMyCourses always fails, to drive the error branch.
+/// getMyAttendance returns immediately (no _latency timer) so pumpAndSettle
+/// doesn't leave a pending Future.delayed timer behind.
+class _FailingCoursesApi extends MockApiClient {
   @override
-  Future<List<MyAttendanceItem>> getMyAttendance() async {
+  Future<List<Course>> getMyCourses() async {
     throw const ApiError(detail: 'boom', statusCode: 500);
   }
+
+  @override
+  Future<List<MyAttendanceItem>> getMyAttendance() async => const [];
 }
 
 Widget _app(ProviderContainer container) => UncontrolledProviderScope(
@@ -33,8 +36,9 @@ Widget _app(ProviderContainer container) => UncontrolledProviderScope(
     );
 
 void main() {
-  testWidgets('renders one row per record with course name + Korean status',
-      (tester) async {
+  testWidgets(
+      'first page lists enrolled courses as cards; tapping opens the '
+      'week×status bottom sheet', (tester) async {
     final c = ProviderContainer(overrides: [
       apiClientProvider.overrideWithValue(MockApiClient() as ApiClient),
     ]);
@@ -43,25 +47,28 @@ void main() {
     await tester.pumpWidget(_app(c));
     await tester.pumpAndSettle();
 
-    // MockApiClient.getMyAttendance() returns 3 rows
-    // (컴퓨터개론/파이썬프로그래밍/데이터구조), matching the DB-backed catalog.
-    expect(find.byType(ListTile), findsNWidgets(3));
+    // Two enrolled courses appear as cards. 데이터구조 is NOT enrolled.
     expect(find.text('컴퓨터개론'), findsOneWidget);
     expect(find.text('파이썬프로그래밍'), findsOneWidget);
-    expect(find.text('데이터구조'), findsOneWidget);
+    expect(find.text('데이터구조'), findsNothing);
 
-    // Status badges carry Korean labels (present/absent/pending spread).
-    expect(find.text(attendanceStatusLabel(AttendanceStatus.present)),
-        findsWidgets);
-    expect(find.text(attendanceStatusLabel(AttendanceStatus.absent)),
-        findsWidgets);
-    expect(find.text(attendanceStatusLabel(AttendanceStatus.pending)),
-        findsWidgets);
+    // Tap the 컴퓨터개론 card → opens the bottom sheet.
+    await tester.tap(find.text('컴퓨터개론'));
+    await tester.pumpAndSettle();
+
+    // 컴퓨터개론 mock record: week 1, present.
+    // Sheet shows the course name header + table columns + week row with ✓.
+    expect(find.text('컴퓨터개론'), findsWidgets);
+    expect(find.text('출석'), findsWidgets);
+    expect(find.text('결석'), findsWidgets);
+    expect(find.text('1주차'), findsOneWidget);
+    expect(find.byIcon(Icons.check), findsOneWidget);
   });
 
-  testWidgets('failed load surfaces error + 다시 시도 retry', (tester) async {
+  testWidgets('failed course load surfaces error + 다시 시도 retry',
+      (tester) async {
     final c = ProviderContainer(overrides: [
-      apiClientProvider.overrideWithValue(_FailingAttendanceApi() as ApiClient),
+      apiClientProvider.overrideWithValue(_FailingCoursesApi() as ApiClient),
     ]);
     addTearDown(c.dispose);
 
@@ -69,7 +76,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byIcon(Icons.error_outline), findsOneWidget);
-    expect(find.textContaining('출결 이력을 불러오지 못했습니다'), findsOneWidget);
+    expect(find.textContaining('수강 강좌를 불러오지 못했습니다'), findsOneWidget);
     expect(find.widgetWithText(FilledButton, '다시 시도'), findsOneWidget);
   });
 }

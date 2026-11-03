@@ -60,9 +60,51 @@ class AuthController extends StateNotifier<AuthState> {
     final token = await store.readAccessToken();
     if (token == null || token.isEmpty) {
       state = const AuthState(phase: AuthPhase.loggedOut);
-    } else {
-      // A token exists; assume device needs (re)confirmation on launch.
-      state = const AuthState(phase: AuthPhase.needsDeviceRegistration);
+      return;
+    }
+
+    // A token exists. Instead of blindly showing the device-registration
+    // screen on every launch (previous behaviour, which forced the register
+    // page to reappear each time the app opened), check whether THIS device's
+    // UUID is already bound on the server and route straight to home.
+    try {
+      final api = _ref.read(apiClientProvider);
+      final uuid = await _ref.read(deviceIdentityProvider).getOrCreate();
+      final binding = await api.getMyDevice();
+      final boundUuid = binding.deviceUuid;
+      if (boundUuid.isEmpty || boundUuid == 'unbound') {
+        // No device bound to this account yet → registration.
+        state = const AuthState(phase: AuthPhase.needsDeviceRegistration);
+      } else if (boundUuid == uuid) {
+        // This exact device is already bound → go straight to home.
+        state = const AuthState(phase: AuthPhase.ready);
+      } else {
+        // A different device is bound (changed device / cleared data) →
+        // email re-auth. Never auto-bind.
+        state = const AuthState(phase: AuthPhase.needsReauth);
+      }
+    } on ApiError catch (e) {
+      if (e.statusCode == 404) {
+        // Server reports no binding for this account → registration.
+        state = const AuthState(phase: AuthPhase.needsDeviceRegistration);
+      } else if (e.statusCode == 401) {
+        // Token expired / invalid → force re-login.
+        await store.clearTokens();
+        state = const AuthState(phase: AuthPhase.loggedOut);
+      } else {
+        // Other server errors: fall back to registration so the user can act.
+        state = const AuthState(phase: AuthPhase.needsDeviceRegistration);
+      }
+    } catch (_) {
+      // Network/unknown failure: if a UUID is already persisted locally, assume
+      // the device was registered before and let the user in optimistically;
+      // otherwise ask to register.
+      final uuid = await store.readDeviceUuid();
+      state = AuthState(
+        phase: (uuid != null && uuid.isNotEmpty)
+            ? AuthPhase.ready
+            : AuthPhase.needsDeviceRegistration,
+      );
     }
   }
 
@@ -72,6 +114,17 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       final api = _ref.read(apiClientProvider);
       final pair = await api.login(email: normalized, password: password);
+      // Mobile app is student-only. The backend also enforces this via the
+      // X-Client-Type header, but guard here too so a non-student token never
+      // gets persisted even if the header check were bypassed.
+      if (pair.role != Role.student) {
+        await _ref.read(secureStoreProvider).clearTokens();
+        state = state.copyWith(
+          busy: false,
+          error: '학생 계정만 모바일 앱에 로그인할 수 있습니다.',
+        );
+        return;
+      }
       await _ref
           .read(secureStoreProvider)
           .writeTokens(access: pair.accessToken, refresh: pair.refreshToken);
@@ -82,7 +135,20 @@ class AuthController extends StateNotifier<AuthState> {
       );
       await registerDevice();
     } on ApiError catch (e) {
-      state = state.copyWith(busy: false, error: e.detail);
+      // 401 "invalid credentials" → translate to a Korean, actionable message.
+      // The backend deliberately returns a generic 401 (no account enumeration),
+      // so we cannot tell "email not found" from "wrong password" here. Surface
+      // a message that covers both cases and points the user to the next step:
+      // sign up (if no account) or re-auth (forgot password / device rebind).
+      if (e.statusCode == 401) {
+        state = state.copyWith(
+          busy: false,
+          error: '이메일 또는 비밀번호가 올바르지 않습니다.\n'
+              '계정이 없다면 회원가입을, 비밀번호를 잊었다면 기기 재인증을 진행해주세요.',
+        );
+      } else {
+        state = state.copyWith(busy: false, error: e.detail);
+      }
     } catch (e) {
       state = state.copyWith(busy: false, error: e.toString());
     }
@@ -98,13 +164,28 @@ class AuthController extends StateNotifier<AuthState> {
       state = state.copyWith(phase: AuthPhase.ready, busy: false);
     } on ApiError catch (e) {
       if (e.statusCode == 409) {
-        state = state.copyWith(phase: AuthPhase.needsReauth, busy: false);
+        // UUID is bound to a different account (or account bound to another
+        // UUID). Surface the server message and route to the email
+        // re-registration screen so the user can prove ownership of the email
+        // they want to bind and detach the UUID.
+        state = state.copyWith(
+          phase: AuthPhase.needsReauth,
+          busy: false,
+          error: e.detail,
+        );
       } else {
         state = state.copyWith(busy: false, error: e.detail);
       }
     } catch (e) {
       state = state.copyWith(busy: false, error: e.toString());
     }
+  }
+
+  /// Manually jump to the re-auth screen (from the "re-register" link on the
+  /// device-registration screen). Keeps the current error so the re-auth
+  /// screen can show why the user got here.
+  void goToReauth() {
+    state = state.copyWith(phase: AuthPhase.needsReauth, clearError: true);
   }
 
   Future<bool> requestReauthCode(String email) async {

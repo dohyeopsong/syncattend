@@ -280,9 +280,49 @@ class MockApiClient implements ApiClient {
         courseId: 'fd673fbe-6b14-4a8a-a74f-accfb5afcf1f',
         courseName: '데이터구조',
         weekNumber: 3,
-        status: AttendanceStatus.pending,
+        status: AttendanceStatus.absent,
         sessionOpenedAt: now.subtract(const Duration(hours: 2)),
       ),
+      // C언어프로그래밍(374142) — 1~15주차 더미. 대부분 출석, 결석/대기 섞임.
+      // 마지막 주(15)는 직전 세션이 방금 열려 미인증(pending).
+      ..._cLangAttendance(now),
+    ];
+  }
+
+  /// C언어프로그래밍(374142) 1..15주차 더미 출결.
+  static List<MyAttendanceItem> _cLangAttendance(DateTime now) {
+    // week → (status, daysAgo). No pending: 출석 마감 시 미인증은 모두 결석.
+    const weeks = <(int, AttendanceStatus, int)>[
+      (1, AttendanceStatus.present, 70),
+      (2, AttendanceStatus.present, 63),
+      (3, AttendanceStatus.absent, 56),
+      (4, AttendanceStatus.present, 49),
+      (5, AttendanceStatus.present, 42),
+      (6, AttendanceStatus.present, 35),
+      (7, AttendanceStatus.absent, 28),
+      (8, AttendanceStatus.present, 21),
+      (9, AttendanceStatus.present, 14),
+      (10, AttendanceStatus.present, 7),
+      (11, AttendanceStatus.absent, 0),
+      (12, AttendanceStatus.present, 0),
+      (13, AttendanceStatus.present, 0),
+      (14, AttendanceStatus.absent, 0),
+      (15, AttendanceStatus.absent, 0),
+    ];
+    return [
+      for (final (w, status, daysAgo) in weeks)
+        MyAttendanceItem(
+          recordId: 'r-c-$w',
+          sessionId: 's-c-$w',
+          courseId: 'e0068e9a-da44-4f30-ab08-d308439d3d90',
+          courseName: 'C언어프로그래밍',
+          weekNumber: w,
+          status: status,
+          verifiedAt: status == AttendanceStatus.present
+              ? now.subtract(Duration(days: daysAgo))
+              : null,
+          sessionOpenedAt: now.subtract(Duration(days: daysAgo, minutes: 2)),
+        ),
     ];
   }
 
@@ -493,6 +533,7 @@ class MockApiClient implements ApiClient {
   final Set<String> _enrolled = {
     '4b8b48f6-7e20-4f34-abed-4b34dca8721b',
     '98902951-0d19-4b24-9c34-2056b9657da0',
+    'e0068e9a-da44-4f30-ab08-d308439d3d90',
   };
 
   @override

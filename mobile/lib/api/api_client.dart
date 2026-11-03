@@ -8,6 +8,25 @@ abstract class ApiClient {
   Future<TokenPair> login({required String email, required String password});
   Future<TokenPair> refresh(String refreshToken);
 
+  /// Signup email verification (team member's flow).
+  /// POST /auth/send-code → emails a 6-digit code (SMTP or dev-stub log).
+  Future<VerifyCodeResult> sendSignupCode(String email);
+
+  /// POST /auth/verify-code → marks the email verified for /auth/register.
+  Future<VerifyCodeResult> verifySignupCode({
+    required String email,
+    required String code,
+  });
+
+  /// POST /auth/register — creates the account (email must be verified first).
+  Future<UserOut> register({
+    required String email,
+    required String password,
+    required Role role,
+    String? name,
+    String? studentId,
+  });
+
   /// Authenticated user's profile (GET /auth/me) — resolves the student's own
   /// id for SSE subscription and history without decoding the JWT.
   Future<UserOut> getMe();

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config.dart';
 import '../../core/design.dart';
 import 'auth_controller.dart';
+import 'signup_screen.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -54,6 +55,29 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     password: _password,
                     auth: auth,
                     onSubmit: _submit,
+                    onSignup: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SignupScreen(),
+                        ),
+                      );
+                    },
+                    onReauth: () {
+                      ref
+                          .read(authControllerProvider.notifier)
+                          .goToReauth();
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => const SignupScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text('계정이 없으신가요? 회원가입'),
                   ),
                 ],
               ),
@@ -74,14 +98,15 @@ class _AppBranding extends StatelessWidget {
     return Column(
       children: [
         Container(
-          width: 64,
-          height: 64,
+          width: 72,
+          height: 72,
           decoration: BoxDecoration(
-            color: AppColors.indigoSubtle,
-            borderRadius: BorderRadius.circular(16),
+            color: AppColors.indigo,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: AppColors.shadowSoftMd,
           ),
           child: const Icon(Icons.verified_user,
-              color: AppColors.indigo, size: 32),
+              color: Colors.white, size: 36),
         ),
         const SizedBox(height: 16),
         const Text(
@@ -112,6 +137,8 @@ class _LoginCard extends StatelessWidget {
     required this.password,
     required this.auth,
     required this.onSubmit,
+    required this.onSignup,
+    required this.onReauth,
   });
 
   final GlobalKey<FormState> formKey;
@@ -119,17 +146,15 @@ class _LoginCard extends StatelessWidget {
   final TextEditingController password;
   final AuthState auth;
   final VoidCallback onSubmit;
+  final VoidCallback onSignup;
+  final VoidCallback onReauth;
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
+      decoration: softCardDecoration(),
       child: Form(
         key: formKey,
         child: Column(
@@ -178,6 +203,30 @@ class _LoginCard extends StatelessWidget {
             if (auth.error != null) ...[
               const SizedBox(height: 16),
               _ErrorNotice(message: auth.error!),
+              const SizedBox(height: 12),
+              // Actionable next-steps paired with the error: sign up (no account
+              // yet) or re-auth (forgot password / device rebind). The backend
+              // returns a generic 401 on purpose (no account enumeration), so we
+              // offer both paths instead of guessing which one the user needs.
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onSignup,
+                      icon: const Icon(Icons.person_add, size: 18),
+                      label: const Text('회원가입'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: onReauth,
+                      icon: const Icon(Icons.phonelink_setup, size: 18),
+                      label: const Text('기기 재인증'),
+                    ),
+                  ),
+                ],
+              ),
             ],
             const SizedBox(height: 24),
             SizedBox(
@@ -232,9 +281,9 @@ class _ErrorNotice extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.danger.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.danger.withValues(alpha: 0.4)),
+        color: AppColors.badgeRedBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.danger.withValues(alpha: 0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,

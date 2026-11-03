@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:record/record.dart';
 
+import '../../core/config.dart';
 import 'audio_nonce_decoder.dart';
 
 /// Minimal capture abstraction the attendance controller depends on. Kept small
@@ -25,9 +26,9 @@ abstract class CaptureService {
 /// Default 48 kHz (not 44.1): iOS mic hardware captures natively at 48 kHz. If
 /// we request 44.1 kHz, `record`'s iOS layer inserts an AVAudioConverter that
 /// downsamples 48→44.1 kHz, and the resampler's anti-aliasing low-pass heavily
-/// attenuates our 18–20 kHz band (it sits right at the filter edge, ~90% of the
+/// attenuates our 17–18.5 kHz band (it sits near the filter edge, ~85% of the
 /// 22.05 kHz Nyquist). Capturing at the hardware-native 48 kHz avoids that
-/// converter entirely, preserving the ultrasonic band. 20 kHz is well within
+/// converter entirely, preserving the ultrasonic band. 18.5 kHz is well within
 /// 48 kHz Nyquist (24 kHz). The decoder is initialised at the same rate so its
 /// FFT bins map to the correct absolute slot frequencies.
 class AudioCaptureService implements CaptureService {
@@ -37,7 +38,11 @@ class AudioCaptureService implements CaptureService {
     this.sampleRate = 48000,
   })  : _recorder = recorder ?? AudioRecorder(),
         decoder = decoder ??
-            AudioNonceDecoder(sampleRate: sampleRate);
+            AudioNonceDecoder(
+              sampleRate: sampleRate,
+              bandLowHz: AppConfig.audioBandLowHz,
+              bandHighHz: AppConfig.audioBandHighHz,
+            );
 
   final AudioRecorder _recorder;
   final AudioNonceDecoder decoder;
@@ -103,7 +108,7 @@ class AudioCaptureService implements CaptureService {
       // we can tell "mic is dead/muted" (peak≈0) from "mic works but no tone".
       if (chunkCount < 5 || chunkCount % 50 == 0) {
         // Also probe the ultrasonic band on the most recent full window so we
-        // see whether 18–20 kHz energy is arriving even when it's below the
+        // see whether 17–18.5 kHz energy is arriving even when it's below the
         // detection threshold (ratio vs threshold tells us louder/closer vs
         // lower-threshold is the fix).
         String bandInfo = '';
@@ -133,8 +138,8 @@ class AudioCaptureService implements CaptureService {
       debugPrint('[audio] pcm stream error: $e');
     });
 
-    // Diagnostics: log detected slots so we can see if the 18–20 kHz band ever
-    // clears the detection threshold on this hardware.
+    // Diagnostics: log detected slots so we can see if the 17–18.5 kHz band
+    // ever clears the detection threshold on this hardware.
     var slotLogCount = 0;
     return decoder.decodeStreamRealtime(
       _windows!.stream,

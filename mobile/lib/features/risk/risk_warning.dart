@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/design.dart';
 import '../../core/providers.dart';
 import '../../models/contract_models.dart';
 
@@ -21,12 +22,24 @@ class RiskWarningBanner extends ConsumerWidget {
   Color _color(RiskLevel level) {
     switch (level) {
       case RiskLevel.danger:
-        return Colors.red.shade100;
+        return AppColors.badgeRedBg;
       case RiskLevel.warning:
-        return Colors.orange.shade100;
+        return AppColors.badgeAmberBg;
       case RiskLevel.info:
       case RiskLevel.unknown:
-        return Colors.blue.shade50;
+        return AppColors.badgeIndigoBg;
+    }
+  }
+
+  Color _iconColor(RiskLevel level) {
+    switch (level) {
+      case RiskLevel.danger:
+        return AppColors.danger;
+      case RiskLevel.warning:
+        return AppColors.warning;
+      case RiskLevel.info:
+      case RiskLevel.unknown:
+        return AppColors.indigo;
     }
   }
 
@@ -38,11 +51,16 @@ class RiskWarningBanner extends ConsumerWidget {
       error: (_, __) => const SizedBox.shrink(),
       data: (warning) => Container(
         width: double.infinity,
-        color: _color(warning.level),
-        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: _color(warning.level),
+          border: Border(
+            bottom: BorderSide(color: AppColors.border.withValues(alpha: 0.5)),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           children: [
-            const Icon(Icons.warning_amber),
+            Icon(Icons.warning_amber, color: _iconColor(warning.level)),
             const SizedBox(width: 8),
             Expanded(
               child: Text('${warning.message} (누적 결석 ${warning.absences})'),
