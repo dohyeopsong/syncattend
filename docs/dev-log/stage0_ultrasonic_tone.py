@@ -36,7 +36,7 @@ HOW TO MEASURE (with your iPhone)
      highest usable frequency and consider that as the token band ceiling.
 5. Repeat at 1 m, 3 m, 5 m to gauge classroom-distance viability.
 6. Record the highest reliably-detected frequency + distance in
-   mobile/README.md (owner B keeps the results table).
+   mobile/README.md (results table).
 
 WARNING: 18-20 kHz is near/above many adults' hearing limit but can be
 audible (and annoying) to younger people and pets. Keep sessions short.

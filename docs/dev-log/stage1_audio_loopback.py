@@ -22,8 +22,8 @@ This tool closes that gap WITHOUT needing an iPhone build:
   4. Reports per-nonce PASS/FAIL and an overall decode rate.
 
 It is protocol-compatible by construction with BOTH:
-  - web/src/lib/ultrasonicEmitter.ts   (owner C, emit half)
-  - .../audio_nonce_decoder.dart        (owner B, decode half)
+  - web/src/lib/ultrasonicEmitter.ts   (emit half)
+  - .../audio_nonce_decoder.dart        (decode half)
 
 No pip installs: pure Python stdlib for synthesis + DFT, ffmpeg for capture,
 afplay for playback (both already on this Mac).
@@ -50,7 +50,7 @@ NOTES
 * macOS will prompt for Microphone permission on first ffmpeg capture — allow it.
 * 18-20 kHz is near/above many adults' hearing limit but audible/annoying to
   younger people and pets. Keep runs short.
-* Record results in mobile/README.md (owner B keeps the Stage-1 results table).
+* Record results in mobile/README.md (Stage-1 results table).
 """
 from __future__ import annotations
 

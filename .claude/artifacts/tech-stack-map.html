@@ -1,0 +1,279 @@
+<title>Syncattend 기술 스택 맵</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: single column, diagram first, then reference table, cards, sequence */
+  :root {
+    --bg: #FAFAFC;
+    --surface: #FFFFFF;
+    --surface2: #F1F1F8;
+    --fg: #1A1B2E;
+    --muted: #63657E;
+    --line: #DDDDE8;
+    --edge: #63657E;
+    --accent: #4F46E5;
+    --accent-soft: #EEEDFE;
+    --sans: 'Noto Sans KR', 'Apple SD Gothic Neo', sans-serif;
+    --mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #121319; --surface: #1B1D26; --surface2: #232634;
+      --fg: #E8E9F2; --muted: #A2A4BC; --line: #34374A;
+      --edge: #A2A4BC; --accent: #9B96F7; --accent-soft: #2A2A45;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #121319; --surface: #1B1D26; --surface2: #232634;
+    --fg: #E8E9F2; --muted: #A2A4BC; --line: #34374A;
+    --edge: #A2A4BC; --accent: #9B96F7; --accent-soft: #2A2A45;
+    color-scheme: dark;
+  }
+  body { background: var(--bg); color: var(--fg); font: 400 16px/1.7 var(--sans); padding-inline: 20px; padding-block: 44px 64px; }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+
+  header h1 { font-size: 30px; font-weight: 700; line-height: 1.3; margin: 0 0 8px; text-wrap: balance; }
+  header .sub { color: var(--muted); max-width: 65ch; margin: 0; }
+
+  h2 { font-size: 19px; font-weight: 700; margin: 56px 0 6px; text-wrap: balance; }
+  .h2sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+
+  /* ---- diagram ---- */
+  .diagram { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 12px; overflow-x: auto; }
+  .diagram svg { display: block; width: 100%; min-width: 700px; height: auto; }
+  .node { fill: var(--surface2); stroke: var(--line); stroke-width: 1.5; }
+  .node.hub { fill: var(--surface2); stroke: var(--accent); stroke-width: 2; }
+  .ntitle { font: 700 15px var(--sans); fill: var(--fg); }
+  .nline { font: 400 12px var(--sans); fill: var(--muted); }
+  .edge { stroke: var(--edge); stroke-width: 1.6; fill: none; }
+  .edge-phys { stroke: var(--accent); stroke-width: 2; fill: none; }
+  .elabel { font: 500 11.5px var(--mono); fill: var(--muted); }
+  .elabel-accent { fill: var(--accent); }
+  .docker { fill: none; stroke: var(--line); stroke-dasharray: 6 6; stroke-width: 1.2; }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 24px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .key { display: inline-block; width: 26px; height: 0; border-top: 2px solid var(--accent); vertical-align: middle; margin-right: 8px; border-radius: 2px; }
+  .key.net { border-color: var(--edge); }
+
+  /* ---- table ---- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  th { font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); background: var(--surface2); }
+  td.conn { font-family: var(--mono); font-size: 13px; white-space: nowrap; }
+  td.tech { font-family: var(--mono); font-size: 13px; color: var(--accent); }
+  @media (prefers-color-scheme: dark) { td.tech { color: var(--accent); } }
+
+  /* ---- cards ---- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px 20px; min-width: 0; }
+  .card h3 { font-size: 16px; margin: 0 0 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .card .role { font: 500 11px var(--mono); color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 2px 10px; letter-spacing: 0.02em; }
+  .card .for { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  .card ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 9px; }
+  .card li { display: grid; grid-template-columns: minmax(110px, auto) 1fr; gap: 10px; align-items: baseline; }
+  .card .t { font: 500 13px var(--mono); white-space: nowrap; }
+  .card .d { font-size: 13.5px; color: var(--muted); }
+
+  /* ---- flow ---- */
+  ol.flow { list-style: none; counter-reset: step; margin: 0; padding: 0; display: grid; gap: 14px; }
+  ol.flow li { counter-increment: step; position: relative; padding-left: 46px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding-block: 13px; padding-right: 16px; }
+  ol.flow li::before { content: counter(step); position: absolute; left: 13px; top: 13px; width: 24px; height: 24px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font: 700 13px/24px var(--mono); text-align: center; }
+  ol.flow b { font-weight: 700; }
+  ol.flow .how { font-family: var(--mono); font-size: 12.5px; color: var(--accent); }
+
+  footer { margin-top: 56px; padding: 16px 18px; border-left: 3px solid var(--accent); background: var(--surface); border-radius: 0 12px 12px 0; font-size: 14px; color: var(--muted); }
+</style>
+
+<div class="wrap">
+<header>
+  <h1>Syncattend 기술 스택 맵</h1>
+  <p class="sub">학생 앱(Flutter) · 교수 웹(React) · 백엔드(FastAPI)가 무엇으로 통신하고 데이터가 어디로 흐르는지 한 장으로 정리한 설계도.</p>
+</header>
+
+<section>
+  <h2>전체 설계도</h2>
+  <p class="h2sub">굵은 인디고 화살표는 공기 중을 이동하는 물리 채널(소리·빛), 회색 화살표는 네트워크·DB 연결.</p>
+  <div class="diagram">
+    <svg viewBox="0 0 960 680" role="img" aria-label="Syncattend 시스템 설계도: 교수 웹과 학생 앱이 QR과 초음파로 연결되고, FastAPI 백엔드가 PostgreSQL과 Redis를 사용한다">
+      <defs>
+        <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" style="fill:var(--edge)"/>
+        </marker>
+        <marker id="ah-accent" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" style="fill:var(--accent)"/>
+        </marker>
+      </defs>
+
+      <!-- docker boundary -->
+      <rect x="270" y="345" width="500" height="315" rx="14" class="docker"/>
+      <text x="282" y="648" class="elabel">Docker Compose · backend + postgres + redis</text>
+
+      <!-- physical channels -->
+      <path d="M300,180 H656" class="edge-phys" marker-end="url(#ah-accent)"/>
+      <text x="478" y="166" class="elabel elabel-accent" text-anchor="middle">초음파 토큰 · 17–18.5 kHz · 스피커→마이크</text>
+      <path d="M300,232 H656" class="edge-phys" marker-end="url(#ah-accent)"/>
+      <text x="478" y="254" class="elabel elabel-accent" text-anchor="middle">동적 QR · 15초 회전 · 화면→카메라</text>
+
+      <!-- professor web -->
+      <rect x="50" y="140" width="250" height="170" rx="12" class="node"/>
+      <text x="70" y="172" class="ntitle">교수 웹 · React</text>
+      <text x="70" y="200" class="nline">Vite · TypeScript</text>
+      <text x="70" y="222" class="nline">Tailwind + shadcn/ui</text>
+      <text x="70" y="244" class="nline">Zustand 상태관리</text>
+      <text x="70" y="266" class="nline">Web Audio API (초음파 송출)</text>
+
+      <!-- student app -->
+      <rect x="660" y="140" width="250" height="170" rx="12" class="node"/>
+      <text x="680" y="172" class="ntitle">학생 앱 · Flutter</text>
+      <text x="680" y="198" class="nline">Riverpod 상태관리</text>
+      <text x="680" y="218" class="nline">mobile_scanner (QR)</text>
+      <text x="680" y="238" class="nline">record · 마이크 48kHz</text>
+      <text x="680" y="258" class="nline">FFT 디코더 (초음파 복호)</text>
+      <text x="680" y="278" class="nline">secure_storage (기기 UUID)</text>
+
+      <!-- backend -->
+      <rect x="355" y="360" width="250" height="170" rx="12" class="node hub"/>
+      <text x="375" y="392" class="ntitle">백엔드 · FastAPI</text>
+      <text x="375" y="418" class="nline">Python 3.12 · uvicorn</text>
+      <text x="375" y="442" class="nline">Pydantic 스키마 검증</text>
+      <text x="375" y="466" class="nline">SQLAlchemy + Alembic</text>
+      <text x="375" y="490" class="nline">JWT · argon2 인증</text>
+
+      <!-- edges: web/app to backend -->
+      <path d="M175,310 V430 H352" class="edge" marker-end="url(#ah)"/>
+      <text x="163" y="372" class="elabel" text-anchor="end">REST JSON (HTTPS)</text>
+      <text x="163" y="388" class="elabel" text-anchor="end">vite /api → :8000</text>
+
+      <path d="M785,310 V430 H608" class="edge" marker-end="url(#ah)"/>
+      <text x="797" y="372" class="elabel">① 출석 인증 요청</text>
+      <text x="797" y="388" class="elabel">REST + JWT Bearer</text>
+
+      <path d="M605,470 H845 V316" class="edge" marker-end="url(#ah)"/>
+      <text x="725" y="462" class="elabel" text-anchor="middle">② SSE 실시간 경고</text>
+
+      <!-- edges: backend to stores -->
+      <path d="M430,530 V557" class="edge" marker-end="url(#ah)"/>
+      <text x="420" y="551" class="elabel" text-anchor="end">SQLAlchemy (async)</text>
+      <path d="M570,530 V557" class="edge" marker-end="url(#ah)"/>
+      <text x="580" y="551" class="elabel">nonce · 15초 TTL</text>
+
+      <!-- postgres -->
+      <rect x="290" y="560" width="190" height="80" rx="12" class="node"/>
+      <text x="310" y="592" class="ntitle">PostgreSQL</text>
+      <text x="310" y="616" class="nline">출결·기기·수강 9 테이블</text>
+
+      <!-- redis -->
+      <rect x="550" y="560" width="190" height="80" rx="12" class="node"/>
+      <text x="570" y="592" class="ntitle">Redis</text>
+      <text x="570" y="616" class="nline">nonce·이메일 코드 (TTL)</text>
+    </svg>
+  </div>
+  <div class="legend">
+    <span><span class="key"></span>공기 중 물리 채널 (강의실 안에 있어야 받을 수 있음)</span>
+    <span><span class="key net"></span>네트워크 · DB 연결</span>
+  </div>
+</section>
+
+<section>
+  <h2>연결 총정리</h2>
+  <p class="h2sub">누가 누구에게, 무엇으로 보내는지 화살표 단위로 나열한 표.</p>
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr><th>연결</th><th>기술</th><th>하는 일</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="conn">교수 웹 → 학생 앱</td><td class="tech">초음파 17–18.5kHz (Web Audio → 마이크)</td><td>공간 증명 — 그 강의실 안에 있는지</td></tr>
+        <tr><td class="conn">교수 웹 → 학생 앱</td><td class="tech">동적 QR · 15초 회전</td><td>시간 증명 — 지금 이 순간의 세션</td></tr>
+        <tr><td class="conn">교수 웹 → 백엔드</td><td class="tech">REST JSON (vite /api 프록시)</td><td>과목·시간표·세션 열기·출결 집계</td></tr>
+        <tr><td class="conn">학생 앱 → 백엔드</td><td class="tech">REST + JWT Bearer</td><td>출석 인증 제출 (QR + 초음파 + 기기 UUID)</td></tr>
+        <tr><td class="conn">백엔드 → 학생 앱</td><td class="tech">SSE (Server-Sent Events)</td><td>인증 결과 · 결석 경고 실시간 푸시</td></tr>
+        <tr><td class="conn">백엔드 ↔ Redis</td><td class="tech">TTL 키 (15초)</td><td>QR·오디오 nonce 단발성 보관, 이메일 인증 코드</td></tr>
+        <tr><td class="conn">백엔드 ↔ PostgreSQL</td><td class="tech">SQLAlchemy (async) + Alembic</td><td>출결·과목·기기·수강 영속 저장</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <h2>컴포넌트 안에는 무엇이 있나</h2>
+  <p class="h2sub">각 파트를 열어 봤을 때 실제로 깔려 있는 기술과 역할.</p>
+  <div class="cards">
+    <section class="card">
+      <h3>학생 앱 <span class="role">Flutter</span></h3>
+      <p class="for">QR 스캔 · 초음파 수신 · 출석 제출</p>
+      <ul>
+        <li><span class="t">Flutter</span><span class="d">네이티브 앱 (iOS / Android)</span></li>
+        <li><span class="t">Riverpod</span><span class="d">상태 관리 (로그인·출석 화면)</span></li>
+        <li><span class="t">mobile_scanner</span><span class="d">동적 QR 실시간 스캔</span></li>
+        <li><span class="t">record</span><span class="d">마이크 녹음 (48kHz, iOS 네이티브)</span></li>
+        <li><span class="t">FFT 디코더</span><span class="d">17–18.5kHz 음에서 nonce 복호</span></li>
+        <li><span class="t">secure_storage</span><span class="d">기기 UUID를 Keychain/Keystore에</span></li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3>교수 웹 <span class="role">React</span></h3>
+      <p class="for">세션 제어 · 시간표 대시보드 · 신호 송출</p>
+      <ul>
+        <li><span class="t">React + TS</span><span class="d">교수용 대시보드 SPA</span></li>
+        <li><span class="t">Vite</span><span class="d">개발 서버·빌드 (/api → :8000 프록시)</span></li>
+        <li><span class="t">Tailwind</span><span class="d">shadcn/ui 컴포넌트와 함께 스타일링</span></li>
+        <li><span class="t">Zustand</span><span class="d">세션·토큰 패널 상태 관리</span></li>
+        <li><span class="t">Web Audio</span><span class="d">17–18.5kHz 초음파 토큰 송출</span></li>
+        <li><span class="t">vitest</span><span class="d">단위 테스트</span></li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3>백엔드 <span class="role">FastAPI</span></h3>
+      <p class="for">인증 · 출결 처리 · 경고 집계의 중심</p>
+      <ul>
+        <li><span class="t">FastAPI</span><span class="d">Python 3.12 비동기 REST (uvicorn)</span></li>
+        <li><span class="t">Pydantic</span><span class="d">요청·응답 스키마 검증</span></li>
+        <li><span class="t">SQLAlchemy</span><span class="d">async ORM (SQLite 테스트 지원)</span></li>
+        <li><span class="t">Alembic</span><span class="d">DB 마이그레이션 (0003·0004)</span></li>
+        <li><span class="t">python-jose</span><span class="d">JWT access/refresh 토큰</span></li>
+        <li><span class="t">argon2</span><span class="d">비밀번호 해싱</span></li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3>데이터 계층 <span class="role">PG + Redis</span></h3>
+      <p class="for">영속 데이터와 짧게 사는 데이터의 분리</p>
+      <ul>
+        <li><span class="t">PostgreSQL</span><span class="d">9개 영속 테이블 (users, devices, courses, course_schedules, sessions, attendance …)</span></li>
+        <li><span class="t">Redis</span><span class="d">15초 TTL 회전 nonce, 재등록 이메일 코드</span></li>
+        <li><span class="t">UNIQUE 제약</span><span class="d">세션당 계정 1회·기기 1회 (대리 방어)</span></li>
+        <li><span class="t">CHECK 제약</span><span class="d">week_number 1–15, 요일 0–6</span></li>
+      </ul>
+    </section>
+    <section class="card">
+      <h3>인프라 · 테스트 <span class="role">Docker</span></h3>
+      <p class="for">띄우는 법과 검증하는 법</p>
+      <ul>
+        <li><span class="t">Docker Compose</span><span class="d">backend + postgres + redis 한 번에 기동</span></li>
+        <li><span class="t">pytest</span><span class="d">백엔드 119개 (동시성 부하 포함)</span></li>
+        <li><span class="t">flutter test</span><span class="d">모바일 86개 (86 passed / 2 skipped)</span></li>
+        <li><span class="t">vitest</span><span class="d">웹 33개</span></li>
+        <li><span class="t">Vercel 등</span><span class="d">배포 계획 (Render · Supabase)</span></li>
+      </ul>
+    </section>
+  </div>
+</section>
+
+<section>
+  <h2>출석 인증 한 번의 흐름</h2>
+  <p class="h2sub">세션 열기부터 결석 경고까지, 60초 인증 창 안에서 일어나는 일.</p>
+  <ol class="flow">
+    <li><b>세션 열기</b> — 교수 웹에서 세션 생성. FastAPI가 <span class="how">sessions (week_number 1–15)</span> 행을 만들고 Redis에 QR·오디오 nonce 발급 <span class="how">(15초 TTL)</span>.</li>
+    <li><b>신호 방송</b> — 교수 화면에 동적 QR 표시 + 스피커로 초음파 송출 <span class="how">(Web Audio API · 17–18.5kHz)</span>.</li>
+    <li><b>수신</b> — 앱이 QR 스캔 <span class="how">(mobile_scanner)</span> + 마이크 녹음 <span class="how">(record · 48kHz)</span> → FFT로 초음파 nonce 복호.</li>
+    <li><b>제출</b> — <span class="how">POST /attendance/verify</span> (JWT 헤더 + qr_token + audio_nonce + device_uuid).</li>
+    <li><b>검증</b> — 서버가 Redis로 nonce 교차 검증, 60초 창 확인, PostgreSQL UNIQUE 제약으로 계정·기기별 딱 1회 강제.</li>
+    <li><b>결과</b> — present 응답 + 과목별 결석 경고 전송 <span class="how">(SSE · 2회 주의 / 3회 위험)</span>.</li>
+  </ol>
+</section>
+
+<footer>
+  전부가 함께 물리는 구조 — JWT는 <b>누구</b>인지, 기기 UUID는 <b>어느 기기</b>인지, 동적 QR은 <b>언제</b>인지, 초음파는 <b>어디</b>에 있는지를 각각 증명한다. 한 축이 뚫려도 나머지가 막는 다층 방어.
+</footer>
+</div>
