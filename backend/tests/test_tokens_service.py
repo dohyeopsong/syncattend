@@ -25,6 +25,7 @@ from app.services.tokens import (
     _used_key,
     consume_nonce,
     cross_verify,
+    get_or_rotate_tokens,
     issue_tokens,
 )
 
@@ -130,3 +131,41 @@ async def test_issue_tokens_rotates_pair(redis):
     # both historical pairings still validate until their own TTL expires
     assert await cross_verify(redis, sid, qr1, audio1) is True
     assert await cross_verify(redis, sid, qr2, audio2) is True
+
+
+async def test_get_or_rotate_tokens_reuses_until_near_expiry(redis):
+    """The polling path must NOT rotate on every call: a token with plenty of
+    TTL left is returned as-is (same qr, same audio, shrinking expires_in), so
+    frequent polling does not shorten the ~15s rotation period."""
+    sid = "sess-poll"
+    ttl = get_settings().nonce_ttl_seconds
+
+    # First call mints.
+    qr1, audio1, exp1 = await get_or_rotate_tokens(redis, sid)
+    assert qr1 and audio1 and exp1 == ttl
+
+    # Immediate re-poll reuses the SAME pair (no rotation).
+    qr2, audio2, exp2 = await get_or_rotate_tokens(redis, sid)
+    assert qr2 == qr1
+    assert audio2 == audio1
+    # expires_in is the real remaining TTL, so it has ticked down a hair but
+    # is still close to the full TTL.
+    assert exp2 <= exp1 and exp2 > ttl - 3
+
+    # Simulate the token nearing expiry: drop its TTL so the refresh threshold
+    # trips → the next call must mint a NEW pair.
+    await redis.expire(_qr_key(sid), 1)
+    await redis.expire(_pair_key(sid, qr1), 1)
+    qr3, audio3, exp3 = await get_or_rotate_tokens(redis, sid)
+    assert qr3 != qr1
+    assert audio3 != audio1
+    assert exp3 == ttl  # fresh mint → full TTL
+
+
+async def test_get_or_rotate_tokens_mints_when_empty(redis):
+    """No current token → mint a fresh pair with the full TTL."""
+    sid = "sess-empty"
+    qr, audio, exp = await get_or_rotate_tokens(redis, sid)
+    assert qr and audio and qr != audio
+    assert exp == get_settings().nonce_ttl_seconds
+    assert await cross_verify(redis, sid, qr, audio) is True

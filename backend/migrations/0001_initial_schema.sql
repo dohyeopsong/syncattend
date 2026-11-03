@@ -1,5 +1,5 @@
 -- Syncattend (SDAS) — initial schema (draft)
--- Owner A only. Aligns with ../contracts/openapi.yaml AND app/models.py.
+-- Aligns with ../contracts/openapi.yaml AND app/models.py.
 -- Applied automatically by Postgres via docker-entrypoint-initdb.d (see infra/).
 --
 -- IDs and app-generated device UUIDs are stored as TEXT (36-char UUID strings),
@@ -70,11 +70,28 @@ CREATE TABLE IF NOT EXISTS enrollments (
     PRIMARY KEY (course_id, student_id)
 );
 
+-- --------------------------------------------------- course_schedules
+-- Normalized weekly timetable: one row per weekly time slot so a course can
+-- meet multiple times per week (e.g. Mon 1교시 + Tue 1교시). Keeps the timetable
+-- in 1NF; relation to courses stays a simple 1:N.
+CREATE TABLE IF NOT EXISTS course_schedules (
+    id           TEXT PRIMARY KEY,
+    course_id    TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    day_of_week  INTEGER NOT NULL CHECK (day_of_week >= 0 AND day_of_week <= 6),  -- 0=Mon..6=Sun
+    start_period INTEGER NOT NULL,                    -- 시작 교시
+    end_period   INTEGER NOT NULL,
+    CHECK (start_period >= 1 AND end_period >= start_period),
+    UNIQUE (course_id, day_of_week, start_period)
+);
+CREATE INDEX IF NOT EXISTS idx_course_schedules_course ON course_schedules(course_id);
+
 -- ------------------------------------------------------------ sessions
 -- Attendance session with a ~60s auth window (professor-opened, extendable).
 CREATE TABLE IF NOT EXISTS sessions (
     id           TEXT PRIMARY KEY,
     course_id    TEXT NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
+    week_number  INTEGER CHECK (week_number IS NULL OR (week_number >= 1 AND week_number <= 15)),  -- 1..15주차
+    schedule_id  TEXT REFERENCES course_schedules(id) ON DELETE SET NULL,  -- which weekly slot (nullable)
     status       TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     window_opened_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     window_expires_at TIMESTAMPTZ NOT NULL,

@@ -4,26 +4,24 @@ Attendance router — cross-verification + aggregation + delta close + correctio
 operationIds: verifyAttendance, getSessionAttendance, batchCloseAttendance,
 correctAttendance.
 
-verifyAttendance runs the 5-step server verification in order:
+verifyAttendance runs the 4-step server verification in order:
   (1) auth window open        -> window_closed
   (2) QR x audio cross-verify -> cross_verify_failed
-  (3) single-use nonce        -> nonce_reused
-  (4) device_uuid matches     -> device_mismatch
-  (5) uniqueness (acct+device)-> duplicate_attendance
+  (3) device_uuid matches     -> device_mismatch
+  (4) uniqueness (acct+device)-> duplicate_attendance
 """
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import CurrentUser, get_current_user, require_professor
-from app.models import Attendance, Course, Device, Session
-from app.redis_client import get_redis
+from app.models import Attendance, Course, Enrollment, Session, User
 from app.schemas import (
     AttendanceAggregate,
     AttendanceRecord,
@@ -31,28 +29,16 @@ from app.schemas import (
     BatchCloseRequest,
     CorrectAttendanceRequest,
     MyAttendanceItem,
-    VerifyReason,
     VerifyRequest,
     VerifyResult,
-    VerifyStatus,
 )
-from app.services.aggregate import absence_count, build_aggregate, risk_warning_for
+from app.services.aggregate import build_aggregate
 from app.services.ownership import load_owned_session
-from app.services.tokens import consume_nonce, cross_verify
-from app.timeutil import as_aware, now as _now
+from app.services.verify import run_verification
 
 router = APIRouter(tags=["attendance"])
 
 logger = logging.getLogger("syncattend.attendance")
-
-
-def _rejected(reason: VerifyReason, *, cross=False, device=False) -> VerifyResult:
-    return VerifyResult(
-        status=VerifyStatus.rejected,
-        cross_verified=cross,
-        device_matched=device,
-        reason=reason,
-    )
 
 
 @router.post(
@@ -64,8 +50,6 @@ async def verify_attendance(
     user: CurrentUser = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> VerifyResult:
-    redis = get_redis()
-
     # Diagnostic breadcrumb: a common client bug is calling verify with a blank
     # or wrong session_id (e.g. QR payload missing session_id). Logging it lets
     # us trace that from server logs. session_id is not sensitive.
@@ -82,70 +66,17 @@ async def verify_attendance(
     if session is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session not found")
 
-    # (1) auth window open
-    window_open = session.status == "open" and as_aware(session.window_expires_at) > _now()
-    if not window_open:
-        response.status_code = status.HTTP_409_CONFLICT
-        return _rejected(VerifyReason.window_closed)
-
-    # (2) QR x audio cross-verify (issued together, both unexpired)
-    if not await cross_verify(redis, body.session_id, body.qr_token, body.audio_nonce):
-        response.status_code = status.HTTP_409_CONFLICT
-        return _rejected(VerifyReason.cross_verify_failed)
-
-    # (3) single-use nonce (consume atomically; second attempt fails)
-    if not await consume_nonce(redis, body.session_id, body.qr_token):
-        response.status_code = status.HTTP_409_CONFLICT
-        return _rejected(VerifyReason.nonce_reused, cross=True)
-
-    # (4) device_uuid matches the account's active binding
-    binding = (
-        await db.execute(
-            select(Device).where(Device.user_id == user.id, Device.is_active.is_(True))
-        )
-    ).scalar_one_or_none()
-    if binding is None or binding.device_uuid != body.device_uuid:
-        response.status_code = status.HTTP_409_CONFLICT
-        return _rejected(VerifyReason.device_mismatch, cross=True)
-
-    # (5) uniqueness: one attendance per (session, student) AND per (session, device)
-    dup = (
-        await db.execute(
-            select(Attendance).where(
-                Attendance.session_id == body.session_id,
-                (Attendance.student_id == user.id)
-                | (Attendance.device_uuid == body.device_uuid),
-            )
-        )
-    ).scalar_one_or_none()
-    if dup is not None:
-        response.status_code = status.HTTP_409_CONFLICT
-        return _rejected(VerifyReason.duplicate_attendance, cross=True, device=True)
-
-    record = Attendance(
-        session_id=body.session_id,
+    outcome = await run_verification(
+        db,
+        session=session,
         student_id=user.id,
         device_uuid=body.device_uuid,
-        status="present",
-        verified_at=_now(),
+        qr_token=body.qr_token,
+        audio_nonce=body.audio_nonce,
     )
-    db.add(record)
-    try:
-        await db.commit()
-    except IntegrityError:
-        # race: uniqueness enforced at DB level
-        await db.rollback()
+    if outcome.rejected:
         response.status_code = status.HTTP_409_CONFLICT
-        return _rejected(VerifyReason.duplicate_attendance, cross=True, device=True)
-
-    absences = await absence_count(db, user.id)
-    return VerifyResult(
-        status=VerifyStatus.present,
-        cross_verified=True,
-        device_matched=True,
-        reason=None,
-        risk_warning=risk_warning_for(absences),
-    )
+    return outcome.result
 
 
 @router.get(
@@ -177,6 +108,7 @@ async def get_my_attendance(
             session_id=att.session_id,
             course_id=course.id,
             course_name=course.name,
+            week_number=sess.week_number,
             status=AttendanceStatus(att.status),
             verified_at=att.verified_at,
             session_opened_at=sess.window_opened_at,
@@ -203,6 +135,79 @@ async def get_session_attendance(
     return await build_aggregate(db, id)
 
 
+@router.get(
+    "/sessions/{id}/attendance/export",
+    operation_id="exportSessionAttendance",
+)
+async def export_session_attendance(
+    id: str,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Export a session's full attendance roster as a downloadable JSON file.
+
+    Returns every enrolled student with their final status (present/absent/
+    pending), verified_at, and correction info, plus session/course context and
+    the date. Suitable for archival / later JSON extraction.
+    """
+    session = await _load_owned_session(db, id, prof.id)
+
+    # Enrolled students for this course.
+    enrolled = (
+        await db.execute(
+            select(Enrollment.student_id, User.name, User.student_id).join(
+                User, Enrollment.student_id == User.id
+            ).where(Enrollment.course_id == session.course_id)
+        )
+    ).all()
+
+    # All attendance records for this session.
+    records = (
+        await db.execute(
+            select(Attendance).where(Attendance.session_id == id)
+        )
+    ).scalars().all()
+    rec_by_student = {r.student_id: r for r in records}
+
+    rows = []
+    for sid, name, school_student_id in enrolled:
+        r = rec_by_student.get(sid)
+        rows.append({
+            "student_id": school_student_id or sid,
+            "name": name,
+            "status": r.status if r else "pending",
+            "verified_at": r.verified_at.isoformat() if r and r.verified_at else None,
+            "corrected_by": r.corrected_by if r else None,
+        })
+
+    course = (
+        await db.execute(select(Course).where(Course.id == session.course_id))
+    ).scalar_one_or_none()
+
+    payload = {
+        "session_id": session.id,
+        "course_id": session.course_id,
+        "course_name": course.name if course else None,
+        "course_code": course.code if course else None,
+        "week_number": session.week_number,
+        "date": session.window_opened_at.isoformat() if session.window_opened_at else None,
+        "total": len(rows),
+        "present": sum(1 for r in rows if r["status"] == "present"),
+        "absent": sum(1 for r in rows if r["status"] == "absent"),
+        "pending": sum(1 for r in rows if r["status"] == "pending"),
+        "students": rows,
+    }
+
+    import json
+    body = json.dumps(payload, ensure_ascii=False, indent=2)
+    fname = f"attendance_{session.id[:8]}.json"
+    return Response(
+        content=body,
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+    )
+
+
 @router.post(
     "/sessions/{id}/attendance/batch",
     response_model=AttendanceAggregate,
@@ -214,8 +219,11 @@ async def batch_close_attendance(
     prof: CurrentUser = Depends(require_professor),
     db: AsyncSession = Depends(get_db),
 ) -> AttendanceAggregate:
-    """Delta close: only apply changed/unverified records (absent by default)."""
-    await _load_owned_session(db, id, prof.id)
+    """Delta close: apply explicit corrections, then auto-fail every enrolled
+    student who still has no verdict (pending) to absent. After a close, the
+    session has zero pending records — unverified == absent by policy."""
+    session = await _load_owned_session(db, id, prof.id)
+    # 1. Apply explicit deltas (professor-in-the-loop corrections).
     for delta in body.deltas:
         existing = (
             await db.execute(
@@ -238,6 +246,46 @@ async def batch_close_attendance(
         elif existing.status != delta.status.value:
             existing.status = delta.status.value
             existing.corrected_by = prof.id
+    # 2. Auto-fail: every enrolled student without a present/absent record
+    #    becomes absent. This is the "no pending after close" policy — 미인증
+    #    학생은 마감 시 모두 결석 처리된다.
+    enrolled = (
+        (
+            await db.execute(
+                select(Enrollment.student_id).where(
+                    Enrollment.course_id == session.course_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    records = (
+        (
+            await db.execute(
+                select(Attendance).where(Attendance.session_id == id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rec_by_student = {r.student_id: r for r in records}
+    for sid in enrolled:
+        r = rec_by_student.get(sid)
+        if r is None:
+            # No record at all → create an absent one.
+            db.add(
+                Attendance(
+                    session_id=id,
+                    student_id=sid,
+                    device_uuid=f"delta:{sid}",
+                    status="absent",
+                    corrected_by=prof.id,
+                )
+            )
+        elif r.status == "pending":
+            r.status = "absent"
+            r.corrected_by = prof.id
     await db.commit()
     return await build_aggregate(db, id)
 

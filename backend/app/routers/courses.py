@@ -13,25 +13,35 @@ their timetable.
 """
 from __future__ import annotations
 
+import asyncio
+import random
+import uuid
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
 from app.deps import CurrentUser, get_current_user, require_professor
-from app.models import Course, Enrollment, User
+from app.models import Course, CourseSchedule, Enrollment, User
 from app.schemas import (
+    BotCleanupResult,
     CourseCatalogItem,
     CourseOut,
     CreateCourseRequest,
+    CreateScheduleRequest,
     EnrollmentOut,
     EnrollRequest,
     MyCourseItem,
     PERIOD_ORDER_ERROR,
     Role,
+    ScheduleOut,
+    SimulateBotsRequest,
+    SimulateBotsResult,
     UpdateCourseRequest,
     period_order_ok,
 )
+from app.services.simulation import cleanup_sim, make_sim_student, verify_bot_for_course
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 # /me/* lives outside the /courses prefix (mirrors attendance's /me/attendance).
@@ -204,7 +214,12 @@ async def enroll_student(
     enrollment = Enrollment(course_id=course_id, student_id=body.student_id)
     db.add(enrollment)
     await db.commit()
-    return EnrollmentOut(course_id=course_id, student_id=body.student_id)
+    return EnrollmentOut(
+        course_id=course_id,
+        student_id=body.student_id,
+        student_number=student.student_id,
+        name=student.name,
+    )
 
 
 @router.get(
@@ -218,14 +233,222 @@ async def list_enrollments(
     db: AsyncSession = Depends(get_db),
 ) -> list[EnrollmentOut]:
     await _load_owned_course(db, course_id, prof.id)
+    # Join users so the roster can show the school student number + name
+    # (otherwise only the opaque user id is available). Bots surface here too
+    # (student_id "SIMbot…" / name "시뮬_…") so the professor can see them.
     rows = (
         await db.execute(
-            select(Enrollment).where(Enrollment.course_id == course_id)
+            select(Enrollment, User)
+            .join(User, User.id == Enrollment.student_id)
+            .where(Enrollment.course_id == course_id)
+            .order_by(User.student_id)
+        )
+    ).all()
+    return [
+        EnrollmentOut(
+            course_id=e.course_id,
+            student_id=e.student_id,
+            student_number=u.student_id,
+            name=u.name,
+        )
+        for e, u in rows
+    ]
+
+
+# --------------------------------------------------- professor bot population
+# Virtual bot students populate the dashboard with realistic attendance data
+# (present + 미인증) so the professor can test realtime monitoring (SSE), stat
+# cards, and 출석 마감 without real students. Bots are COURSE-scoped: they are
+# enrolled as 미인증 course students immediately (so the roster + dashboard total
+# reflect them at once), and the present bots wait for the session's auth window
+# to open, then verify after a per-bot random delay. Calling again ADDS more
+# bots (UUID-based labels prevent collision). DELETE removes ALL bots at once.
+@router.post(
+    "/{course_id}/simulate-bots",
+    response_model=SimulateBotsResult,
+    operation_id="simulateBots",
+)
+async def simulate_bots(
+    course_id: str,
+    body: SimulateBotsRequest,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> SimulateBotsResult:
+    """Enroll `count` virtual bot students in this course, then schedule a
+    `present_ratio` fraction to verify (present) once a session opens; the rest
+    stay 미인증.
+
+    Enrollment is SYNCHRONOUS: every bot is created, device-bound, and enrolled
+    in the course within this request, so the dashboard's total + 미인증 (and the
+    course roster) reflect them immediately — BEFORE the professor opens a
+    session. The present bots then wait for the session's auth window to open
+    (bounded wait) and sleep a random delay in [delay_min, delay_max] seconds
+    (default 5..25) before verifying through the REAL path, so 출석 trickles
+    into the realtime dashboard (SSE) one-by-one instead of arriving in a burst.
+
+    Calling again ADDS more bots (UUID-based labels prevent email / student_id
+    / device_uuid collision with bots from a previous call). Data is NOT cleaned
+    up — call DELETE /courses/{course_id}/simulate-bots to remove ALL bots at
+    once afterwards. Professor-only; course owned by the caller.
+    """
+    await _load_owned_course(db, course_id, prof.id)
+    count = body.count
+    present_target = round(count * body.present_ratio)
+
+    dmin = min(body.delay_min, body.delay_max)
+    dmax = max(body.delay_min, body.delay_max)
+
+    # Enroll every bot synchronously so they appear in the roster (미인증)
+    # right away. UUID-based labels guarantee uniqueness across repeated calls
+    # (additive generation) — no email/student_id/device_uuid collision.
+    bot_specs: list[tuple[str, str]] = []  # (user_id, device_uuid)
+    for _ in range(count):
+        label = f"bot{uuid.uuid4().hex[:8]}"
+        uid, dev = await make_sim_student(db, label=label, course_id=course_id)
+        bot_specs.append((uid, dev))
+    await db.commit()
+
+    # Schedule only the present bots to verify once the session window opens.
+    for uid, dev in bot_specs[:present_target]:
+        delay = random.uniform(dmin, dmax) if dmax > 0 else 0.0
+        asyncio.create_task(verify_bot_for_course(course_id, uid, dev, delay))
+
+    return SimulateBotsResult(
+        course_id=course_id,
+        total_bots=count,
+        present=present_target,
+        unverified=count - present_target,
+    )
+
+
+@router.delete(
+    "/{course_id}/simulate-bots",
+    response_model=BotCleanupResult,
+    operation_id="cleanupBots",
+)
+async def cleanup_bots(
+    course_id: str,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> BotCleanupResult:
+    """Remove all virtual bot students (and their devices/enrollments/
+    attendance) so the dashboard returns to real data. Professor-only."""
+    await _load_owned_course(db, course_id, prof.id)
+    removed = await cleanup_sim(db)
+    return BotCleanupResult(
+        course_id=course_id, removed=removed, cleaned_up=True
+    )
+
+
+# ------------------------------------------------- professor weekly schedules
+def _schedule_out(s: CourseSchedule) -> ScheduleOut:
+    return ScheduleOut(
+        id=s.id,
+        course_id=s.course_id,
+        day_of_week=s.day_of_week,
+        start_period=s.start_period,
+        end_period=s.end_period,
+    )
+
+
+@router.post(
+    "/{course_id}/schedules",
+    response_model=ScheduleOut,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="addCourseSchedule",
+)
+async def add_course_schedule(
+    course_id: str,
+    body: CreateScheduleRequest,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> ScheduleOut:
+    """Add one weekly time slot (e.g. Mon 1교시) to a course. A course meeting
+    multiple times per week has one row per slot."""
+    await _load_owned_course(db, course_id, prof.id)
+    dup = (
+        await db.execute(
+            select(CourseSchedule).where(
+                CourseSchedule.course_id == course_id,
+                CourseSchedule.day_of_week == body.day_of_week,
+                CourseSchedule.start_period == body.start_period,
+            )
+        )
+    ).scalar_one_or_none()
+    if dup is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="a slot with this day/start_period already exists",
+        )
+    slot = CourseSchedule(
+        course_id=course_id,
+        day_of_week=body.day_of_week,
+        start_period=body.start_period,
+        end_period=body.end_period,
+    )
+    db.add(slot)
+    await db.commit()
+    await db.refresh(slot)
+    return _schedule_out(slot)
+
+
+@router.get(
+    "/{course_id}/schedules",
+    response_model=list[ScheduleOut],
+    operation_id="listCourseSchedules",
+)
+async def list_course_schedules(
+    course_id: str,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[ScheduleOut]:
+    """All weekly slots of a course, ordered by day then period. Readable by any
+    authenticated user (timetable rendering)."""
+    course = (
+        await db.execute(select(Course).where(Course.id == course_id))
+    ).scalar_one_or_none()
+    if course is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
+        )
+    rows = (
+        await db.execute(
+            select(CourseSchedule)
+            .where(CourseSchedule.course_id == course_id)
+            .order_by(CourseSchedule.day_of_week, CourseSchedule.start_period)
         )
     ).scalars().all()
-    return [
-        EnrollmentOut(course_id=e.course_id, student_id=e.student_id) for e in rows
-    ]
+    return [_schedule_out(s) for s in rows]
+
+
+@router.delete(
+    "/{course_id}/schedules/{schedule_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    operation_id="deleteCourseSchedule",
+)
+async def delete_course_schedule(
+    course_id: str,
+    schedule_id: str,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    await _load_owned_course(db, course_id, prof.id)
+    slot = (
+        await db.execute(
+            select(CourseSchedule).where(
+                CourseSchedule.id == schedule_id,
+                CourseSchedule.course_id == course_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if slot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="schedule not found"
+        )
+    # sessions.schedule_id is ON DELETE SET NULL, so existing sessions survive.
+    await db.delete(slot)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ----------------------------------------------- student catalog + self-enroll
@@ -323,6 +546,8 @@ async def enroll_self(
         )
     db.add(Enrollment(course_id=course_id, student_id=user.id))
     await db.commit()
+    # CurrentUser exposes only id/role/email; the roster (listEnrollments) joins
+    # the full user row to surface student_number + name, so None here is fine.
     return EnrollmentOut(course_id=course_id, student_id=user.id)
 
 

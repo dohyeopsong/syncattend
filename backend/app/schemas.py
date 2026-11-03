@@ -66,6 +66,18 @@ class RegisterUserRequest(BaseModel):
     password: str = Field(min_length=8)
     role: Role
     name: str | None = None
+    # Student number (학번). Required for students and unique across all users;
+    # professors leave this unset (stored as NULL).
+    student_id: str | None = Field(default=None, max_length=32)
+
+    @model_validator(mode="after")
+    def _student_requires_student_id(self) -> "RegisterUserRequest":
+        if self.role == Role.student and not (self.student_id and self.student_id.strip()):
+            raise ValueError("학생(student) 회원가입에는 학번(student_id)이 필요합니다.")
+        if self.role == Role.professor and self.student_id:
+            # Professors have no 학번 — reject rather than silently drop it.
+            raise ValueError("교수(professor) 회원가입에는 학번을 입력할 수 없습니다.")
+        return self
 
 
 class UserOut(BaseModel):
@@ -73,6 +85,34 @@ class UserOut(BaseModel):
     email: EmailStr
     role: Role
     name: str | None = None
+    student_id: str | None = None
+
+
+# --- Signup email verification (team member's flow: send-code → verify-code) ---
+class SendCodeRequest(BaseModel):
+    # str (not EmailStr) so the @wku.ac.kr domain check is handled in the route,
+    # matching the team member's original implementation.
+    email: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
+
+
+class VerifyCodeRequest(BaseModel):
+    email: str
+    code: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
+
+
+class VerifyCodeResult(BaseModel):
+    verified: bool
+    message: str
 
 
 class LoginRequest(BaseModel):
@@ -231,6 +271,29 @@ class MyCourseItem(BaseModel):
     credits: float | None = None
 
 
+# ---------------------------------------------------------- course schedules
+class CreateScheduleRequest(BaseModel):
+    """One weekly time slot for a course (e.g. Mon 1교시, or Wed 1~3교시)."""
+
+    day_of_week: int = Field(ge=0, le=6)  # 0=Mon..6=Sun
+    start_period: int = Field(ge=MIN_PERIOD, le=MAX_PERIOD)
+    end_period: int = Field(ge=MIN_PERIOD, le=MAX_PERIOD)
+
+    @model_validator(mode="after")
+    def _check_period_order(self) -> "CreateScheduleRequest":
+        if not period_order_ok(self.start_period, self.end_period):
+            raise ValueError(PERIOD_ORDER_ERROR)
+        return self
+
+
+class ScheduleOut(BaseModel):
+    id: str
+    course_id: str
+    day_of_week: int
+    start_period: int
+    end_period: int
+
+
 class EnrollRequest(BaseModel):
     student_id: str
 
@@ -238,12 +301,19 @@ class EnrollRequest(BaseModel):
 class EnrollmentOut(BaseModel):
     course_id: str
     student_id: str
+    # Readable display fields joined from the user (school student number + name).
+    # Bots surface here as e.g. "SIMbot1a2b3c4d" / "시뮬_bot1a2b3c4d" so they are
+    # visible in the professor's roster alongside real students.
+    student_number: str | None = None
+    name: str | None = None
 
 
 # ---------------------------------------------------------------- sessions
 class CreateSessionRequest(BaseModel):
     course_id: str
     window_seconds: int = 60
+    week_number: int | None = Field(default=None, ge=1, le=15)  # 1..15주차
+    schedule_id: str | None = None  # which weekly slot (Mon vs Tue) this session is
 
 
 class ExtendWindowRequest(BaseModel):
@@ -253,6 +323,8 @@ class ExtendWindowRequest(BaseModel):
 class SessionOut(BaseModel):
     session_id: str
     course_id: str
+    week_number: int | None = None
+    schedule_id: str | None = None
     window_open: bool
     window_remaining: int
     status: str
@@ -304,6 +376,7 @@ class MyAttendanceItem(BaseModel):
     session_id: str
     course_id: str
     course_name: str
+    week_number: int | None = None
     status: AttendanceStatus
     verified_at: datetime | None = None
     session_opened_at: datetime | None = None
@@ -322,8 +395,72 @@ class CorrectAttendanceRequest(BaseModel):
     status: AttendanceStatus
 
 
+class UnverifiedStudent(BaseModel):
+    """A student who has not yet verified (no present/absent record) for a
+    session, with readable display fields so the professor review table can show
+    the school 학번 + name instead of the raw user UUID."""
+    student_id: str  # internal user id (UUID) — the Delta/batch key
+    student_number: str | None = None  # school 학번, joined from the user
+    name: str | None = None  # display name, joined from the user
+
+
 class AttendanceAggregate(BaseModel):
     session_id: str
     total: int
     present: int
-    unverified: list[str] = Field(default_factory=list)
+    absent: int = 0
+    unverified: list[UnverifiedStudent] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------- simulation
+# Virtual attendance simulation: the professor opens a session, then runs all
+# verify cases against synthetic students to confirm the 4-step gate works.
+# cleanup deletes the synthetic students/devices/attendance afterwards.
+
+class SimulationCase(BaseModel):
+    name: str
+    expected_rejected: bool
+    expected_reason: VerifyReason | None
+    rejected: bool
+    reason: VerifyReason | None
+    passed: bool  # True if the actual result matches the expected outcome
+
+
+class SimulationResult(BaseModel):
+    session_id: str
+    cases: list[SimulationCase]
+    cleaned_up: bool
+
+
+# Virtual bot population: create N synthetic students enrolled in the session's
+# course, have a fraction verify (present) and leave the rest unverified, so the
+# professor dashboard (stat cards / realtime SSE / Delta close) populates with
+# realistic data without real students. Data is NOT auto-cleaned — call the
+# cleanup endpoint to remove the bots afterwards.
+
+class SimulateBotsRequest(BaseModel):
+    count: int = Field(default=20, ge=1, le=200)
+    # Fraction of bots that successfully verify (0.0..1.0). The rest stay
+    # 미인증 (enrolled but no present record).
+    present_ratio: float = Field(default=0.7, ge=0.0, le=1.0)
+    # Each bot waits a random delay in [delay_min, delay_max] seconds before
+    # verifying, so attendance trickles in over time (realistic for testing the
+    # realtime dashboard / SSE). Defaults 5..25s; set both 0 for instant.
+    delay_min: float = Field(default=5.0, ge=0.0, le=600.0)
+    delay_max: float = Field(default=25.0, ge=0.0, le=600.0)
+
+
+class SimulateBotsResult(BaseModel):
+    course_id: str
+    total_bots: int
+    # Number of bots SCHEDULED to verify as present (actual count appears in the
+    # dashboard as background verification completes). The rest stay 미인증.
+    present: int
+    unverified: int
+
+
+class BotCleanupResult(BaseModel):
+    course_id: str
+    removed: int
+    cleaned_up: bool
+

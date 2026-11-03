@@ -90,7 +90,14 @@ async def test_reject_cross_verify_failed(client, session):
     assert r.json()["reason"] == "cross_verify_failed"
 
 
-async def test_reject_nonce_reused(client, session):
+async def test_reject_duplicate_same_student_replay(client, session):
+    """Same student submitting the same token twice → duplicate_attendance.
+
+    Previously this was caught by the single-use nonce guard (nonce_reused),
+    but that guard blocked ALL students after the first from scanning the same
+    displayed QR. Replay by the same student is now caught by the DB-level
+    UNIQUE(session_id, student_id) constraint → duplicate_attendance.
+    """
     ctx = await _setup(client, session)
     body = {
         "session_id": ctx["session"].id,
@@ -100,10 +107,63 @@ async def test_reject_nonce_reused(client, session):
     }
     first = await client.post("/attendance/verify", json=body, headers=ctx["s_hdr"])
     assert first.status_code == 200
-    # replay the very same QR/audio pair (relay attack) → single-use guard
+    # replay the very same QR/audio pair → duplicate_attendance (not nonce_reused)
     second = await client.post("/attendance/verify", json=body, headers=ctx["s_hdr"])
     assert second.status_code == 409
-    assert second.json()["reason"] == "nonce_reused"
+    assert second.json()["reason"] == "duplicate_attendance"
+
+
+async def test_multiple_students_same_token_all_pass(client, session):
+    """Multiple DIFFERENT students scan the same displayed QR + hear the same
+    audio → all must succeed. This is the real classroom scenario: one QR on
+    the screen, 20+ students scan it. The single-use nonce guard previously
+    blocked everyone after the first; it has been removed.
+    """
+    from tests.conftest import seed_enrollment
+
+    ctx = await _setup(client, session)
+    body = {
+        "session_id": ctx["session"].id,
+        "qr_token": ctx["tok"]["qr_token"],
+        "audio_nonce": ctx["tok"]["audio_nonce"],
+    }
+
+    # Create 4 additional students, each enrolled + with their own device.
+    extra_students = []
+    for i in range(4):
+        stu = await seed_user(
+            session, f"multi_{i}_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student"
+        )
+        await seed_enrollment(session, ctx["course"].id, stu.id)
+        dev_uuid = str(uuid.uuid4())
+        hdr = auth_header(stu.id, "student")
+        await client.post(
+            "/devices/register", json={"device_uuid": dev_uuid}, headers=hdr
+        )
+        extra_students.append((stu, dev_uuid, hdr))
+
+    # The original setup student goes first.
+    results = []
+    r = await client.post(
+        "/attendance/verify",
+        json={**body, "device_uuid": ctx["student_uuid"]},
+        headers=ctx["s_hdr"],
+    )
+    results.append(r)
+
+    # Then 4 more students — same qr_token, same audio_nonce, different devices.
+    for stu, dev_uuid, hdr in extra_students:
+        r = await client.post(
+            "/attendance/verify",
+            json={**body, "device_uuid": dev_uuid},
+            headers=hdr,
+        )
+        results.append(r)
+
+    # All 5 must succeed — same token, different students/devices.
+    for i, r in enumerate(results):
+        assert r.status_code == 200, f"student {i} failed: {r.text}"
+        assert r.json()["status"] == "present"
 
 
 async def test_reject_device_mismatch(client, session):
@@ -176,7 +236,9 @@ async def test_aggregate_and_delta_batch(client, session):
     await seed_enrollment(session, ctx["course"].id, absent.id)
 
     agg2 = (await client.get(f"/sessions/{sid}/attendance", headers=p_hdr)).json()
-    assert absent.id in agg2["unverified"]
+    # unverified now carries readable student summaries (joined from the user);
+    # the internal id is the Delta/batch key.
+    assert any(u["student_id"] == absent.id for u in agg2["unverified"])
 
     r = await client.post(
         f"/sessions/{sid}/attendance/batch",

@@ -23,7 +23,11 @@ from sse_starlette.sse import EventSourceResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.deps import CurrentUser, get_current_user, require_professor
+from app.deps import (
+    CurrentUser,
+    get_current_user_for_sse,
+    require_professor_for_sse,
+)
 from app.services.aggregate import absence_count, build_aggregate, risk_warning_for
 
 router = APIRouter(prefix="/sse", tags=["sse"])
@@ -65,7 +69,7 @@ async def session_attendance_events(
 @router.get("/students/{id}", operation_id="sseStudent")
 async def sse_student(
     id: str,
-    user: CurrentUser = Depends(get_current_user),
+    user: CurrentUser = Depends(get_current_user_for_sse),
     db: AsyncSession = Depends(get_db),
 ) -> EventSourceResponse:
     return EventSourceResponse(student_risk_events(db, id))
@@ -74,7 +78,7 @@ async def sse_student(
 @router.get("/sessions/{id}", operation_id="sseSession")
 async def sse_session(
     id: str,
-    prof: CurrentUser = Depends(require_professor),
+    prof: CurrentUser = Depends(require_professor_for_sse),
     db: AsyncSession = Depends(get_db),
 ) -> EventSourceResponse:
     return EventSourceResponse(session_attendance_events(db, id))

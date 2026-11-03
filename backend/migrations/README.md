@@ -1,19 +1,24 @@
-# backend/migrations/ — DB Schema (Owner A only)
+# backend/migrations/ — DB Schema
 
-Draft PostgreSQL schema for Syncattend V3. **Only owner A edits this.**
+Draft PostgreSQL schema for Syncattend V3.
 
 - `0001_initial_schema.sql` — users, devices (+ device_changes), courses (+ enrollments),
-  sessions (with 60s auth window), attendance (server uniqueness constraints), nonces (single-use audit).
+  sessions (with 60s auth window + optional `week_number` 1..15주차), attendance
+  (server uniqueness constraints), nonces (single-use audit).
 - `0002_course_schedule.sql` — optional timetable/catalog fields on `courses`
   (code, department, professor_name, day_of_week, start_period, end_period, location, credits),
   all nullable. Idempotent `ADD COLUMN IF NOT EXISTS` for databases created under 0001;
   fresh boots already get the columns via the updated 0001 `CREATE TABLE courses`.
+- `0003_session_week_number.sql` — optional `week_number` (1..15) on `sessions`, so
+  attendance can be reported per week ("1주차 출석" .. "15주차 출석"). Idempotent
+  `ADD COLUMN IF NOT EXISTS` + guarded CHECK for databases created under 0001; fresh
+  boots already get the column via the updated 0001 `CREATE TABLE sessions`.
 
 ## How it's applied
 For local dev, `infra/docker-compose.yml` mounts this folder into Postgres'
 `docker-entrypoint-initdb.d`, so `0001_initial_schema.sql` runs on first container start.
 
-For managed environments, A can later adopt Alembic (already in `requirements.txt`)
+For managed environments, adopt Alembic (already in `requirements.txt`)
 and translate these into versioned migrations.
 
 ## Alembic (schema evolution)
@@ -25,7 +30,7 @@ Alembic is configured for going-forward, versioned schema changes:
   - `alembic revision --autogenerate -m "message"`
   - `alembic upgrade head`
 
-The raw SQL file and the ORM models are kept in sync by owner A. The SQL file is the
+The raw SQL file and the ORM models are kept in sync. The SQL file is the
 fast path for local `docker compose` first-boot; Alembic is the path for evolving a
 long-lived database.
 

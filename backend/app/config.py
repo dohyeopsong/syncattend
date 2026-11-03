@@ -28,6 +28,18 @@ class Settings(BaseSettings):
     reregister_code_ttl_seconds: int = 300               # 5 min
     reregister_code_length: int = 6
 
+    # Signup email verification code (회원가입 이메일 인증)
+    signup_code_ttl_seconds: int = 900                   # 15 min
+    signup_code_length: int = 6
+
+    # SMTP for email verification (team member's flow). When SMTP_USER /
+    # SMTP_PASSWORD are unset, codes are logged instead of sent (dev stub).
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    smtp_from_name: str = "Syncattend"
+
     # Risk-group thresholds (SSE warning) — externalized boundaries.
     # danger  when absences >= risk_absence_threshold
     # warning when absences >= risk_warning_threshold (and < danger)

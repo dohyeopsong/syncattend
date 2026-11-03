@@ -145,8 +145,11 @@ async def test_reregister_request_stores_code_in_redis(client, session):
     assert code is not None and code.isdigit()
 
 
-async def test_reregister_request_rejects_mismatched_account(client, session):
-    """A valid @wku.ac.kr email that isn't the caller's account → 400."""
+async def test_reregister_request_allows_arbitrary_school_email(client, session):
+    """A valid @wku.ac.kr email that isn't the caller's account is still
+    accepted (202): the whole point of re-registration is to switch the device
+    UUID to a DIFFERENT email, so request must not gate on account matching —
+    only on the school-email domain. Ownership is proven later at /confirm."""
     user = await seed_user(session, "s10@wku.ac.kr", "pw123456", "student")
     hdr = auth_header(user.id, "student")
     r = await client.post(
@@ -154,8 +157,11 @@ async def test_reregister_request_rejects_mismatched_account(client, session):
         json={"email": "someone.else@wku.ac.kr"},
         headers=hdr,
     )
-    assert r.status_code == 400
-    assert "match" in r.json()["detail"].lower()
+    assert r.status_code == 202, r.text
+    from app.redis_client import get_redis
+
+    code = await get_redis().get("reregister:code:someone.else@wku.ac.kr")
+    assert code is not None and code.isdigit()
 
 
 async def test_reregister_request_malformed_email_is_422(client, session):

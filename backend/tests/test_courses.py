@@ -51,7 +51,9 @@ async def test_enroll_and_list_enrollments(client, session):
         headers=hdr,
     )
     assert r.status_code == 201, r.text
-    assert r.json() == {"course_id": course["id"], "student_id": stu.id}
+    body = r.json()
+    assert body["course_id"] == course["id"]
+    assert body["student_id"] == stu.id
 
     listed = await client.get(f"/courses/{course['id']}/enrollments", headers=hdr)
     assert listed.status_code == 200
@@ -270,7 +272,8 @@ async def test_enroll_self_and_duplicate_conflict(client, session):
     shdr = auth_header(stu.id, "student")
     r = await client.post(f"/courses/{course['id']}/enroll-self", headers=shdr)
     assert r.status_code == 201, r.text
-    assert r.json() == {"course_id": course["id"], "student_id": stu.id}
+    assert r.json()["course_id"] == course["id"]
+    assert r.json()["student_id"] == stu.id
     dup = await client.post(f"/courses/{course['id']}/enroll-self", headers=shdr)
     assert dup.status_code == 409
 

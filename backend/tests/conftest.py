@@ -109,3 +109,28 @@ async def seed_open_session(session, course_id, window_seconds=60):
 
 def auth_header(user_id, role):
     return {"Authorization": f"Bearer {create_access_token(user_id, role)}"}
+
+
+async def verify_signup_email(client, email):
+    """
+    Run the team member's send-code + verify-code flow against fakeredis so
+    that /auth/register accepts the email. Returns the email.
+
+    The code is read directly from fakeredis (the dev-stub delivery path logs
+    it but does not expose it via HTTP); this keeps tests deterministic without
+    a real mailbox.
+    """
+    from app.redis_client import get_redis
+    from app.services.email_codes import _signup_code_key
+
+    r = await client.post("/auth/send-code", json={"email": email})
+    assert r.status_code == 202, r.text
+    redis = get_redis()
+    raw = await redis.get(_signup_code_key(email))
+    code = raw.decode() if isinstance(raw, bytes) else str(raw)
+    r = await client.post(
+        "/auth/verify-code", json={"email": email, "code": code}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["verified"] is True
+    return email

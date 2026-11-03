@@ -41,6 +41,10 @@ class User(Base):
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     name: Mapped[str | None] = mapped_column(String(255))
+    # Student number (학번). Unique per student — two accounts must never share
+    # one. Professors leave this NULL. Backfilled with a synthetic value for
+    # accounts created before this column existed (see migration 0002).
+    student_id: Mapped[str | None] = mapped_column(String(32), unique=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (
@@ -102,6 +106,41 @@ class Course(Base):
     )
 
 
+class CourseSchedule(Base):
+    """A single weekly time slot of a course (normalized timetable).
+
+    A course can meet multiple times per week (e.g. Mon 1교시 + Tue 1교시), so
+    each slot is one row here instead of single day/period columns on `courses`.
+    This keeps the timetable in 1NF (no repeating groups) while the relation to
+    `courses` stays a simple 1:N.
+    """
+
+    __tablename__ = "course_schedules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    course_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)  # 0=Mon .. 6=Sun
+    start_period: Mapped[int] = mapped_column(Integer, nullable=False)  # 시작 교시
+    end_period: Mapped[int] = mapped_column(Integer, nullable=False)    # 종료 교시
+
+    __table_args__ = (
+        CheckConstraint(
+            "day_of_week >= 0 AND day_of_week <= 6",
+            name="ck_course_schedules_day_of_week",
+        ),
+        CheckConstraint(
+            "start_period >= 1 AND end_period >= start_period",
+            name="ck_course_schedules_period_range",
+        ),
+        UniqueConstraint(
+            "course_id", "day_of_week", "start_period",
+            name="uq_course_schedules_slot",
+        ),
+    )
+
+
 class Enrollment(Base):
     __tablename__ = "enrollments"
 
@@ -120,6 +159,15 @@ class Session(Base):
     course_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
     )
+    # Academic week number (1..15). Nullable for backward compatibility with
+    # sessions created before this column existed; new sessions should set it so
+    # attendance can be reported per week ("1주차 출석", "2주차 출석", ...).
+    week_number: Mapped[int | None] = mapped_column(Integer)
+    # Which weekly time slot this session belongs to (e.g. the Mon slot vs the
+    # Tue slot of the same course). Nullable: sessions may be ad-hoc / legacy.
+    schedule_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("course_schedules.id", ondelete="SET NULL")
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
     window_opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now
@@ -131,6 +179,10 @@ class Session(Base):
 
     __table_args__ = (
         CheckConstraint("status IN ('open', 'closed')", name="ck_sessions_status"),
+        CheckConstraint(
+            "week_number IS NULL OR (week_number >= 1 AND week_number <= 15)",
+            name="ck_sessions_week_number",
+        ),
     )
 
 

@@ -37,14 +37,67 @@ paths:
               schema: { $ref: '#/components/schemas/Health' }
 
   # ---------------------------------------------------------------- auth
+  /auth/send-code:
+    post:
+      tags: [auth]
+      summary: Email a signup verification code
+      description: >
+        Sends a 6-digit verification code to a @wku.ac.kr email. The code is
+        stored in Redis with a 15-minute TTL. Already-registered emails are
+        rejected (409). Delivery is via SMTP when configured, otherwise the
+        code is logged as a dev stub. Team member's signup flow step 1.
+      operationId: sendSignupCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendCodeRequest' }
+      responses:
+        '202':
+          description: Code sent (or logged in dev stub mode)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyCodeResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409':
+          description: Email already registered
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/verify-code:
+    post:
+      tags: [auth]
+      summary: Verify a signup code
+      description: >
+        Validates the 6-digit code. On success the email is marked verified in
+        Redis (15-minute TTL) and may be used to complete /auth/register.
+        Single-use: the code is consumed on success. Team member's signup flow
+        step 2.
+      operationId: verifySignupCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyCodeRequest' }
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerifyCodeResult' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
   /auth/register:
     post:
       tags: [auth]
       summary: Register a new account (student/professor)
       description: >
         Creates an account with a bcrypt/argon2-hashed password. Student
-        accounts must use a @wku.ac.kr email (identity defense). Duplicate
-        emails are rejected with 409.
+        accounts must use a @wku.ac.kr email (identity defense). The email
+        MUST have completed /auth/send-code + /auth/verify-code first (the
+        verified flag is consumed on success). Duplicate emails are rejected
+        with 409. Team member's signup flow step 3.
       operationId: registerUser
       requestBody:
         required: true
@@ -69,6 +122,22 @@ paths:
       tags: [auth]
       summary: Login, issue JWT
       operationId: login
+      description: >
+        The client declares its type via the `X-Client-Type` header (web|mobile)
+        so the server can enforce client gating: the web dashboard is
+        professor-only and the mobile app is student-only. A role mismatch
+        (e.g. a student logging into the web) is rejected with 403 before a
+        token is issued.
+      parameters:
+        - in: header
+          name: X-Client-Type
+          description: >
+            The calling client. `web` → only professor accounts may log in;
+            `mobile` → only student accounts. Omitted/unknown → no gating.
+          required: false
+          schema:
+            type: string
+            enum: [web, mobile]
       requestBody:
         required: true
         content:
@@ -81,6 +150,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TokenPair' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403':
+          description: Role not allowed for this client type.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /auth/refresh:
     post:
@@ -399,6 +473,60 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /courses/{course_id}/simulate-bots:
+    post:
+      tags: [courses]
+      summary: Populate dashboard with virtual bot students (no cleanup)
+      description: >
+        Enrolls `count` synthetic students in this course SYNCHRONOUSLY, so the
+        dashboard's total + 미인증 (and the course roster) reflect them
+        immediately — BEFORE the professor opens a session. A `present_ratio`
+        fraction are then scheduled to verify attendance through the REAL verify
+        path once the session's auth window opens, after a random delay in
+        [delay_min, delay_max] seconds, so 출석 trickles into the realtime
+        dashboard (SSE) one-by-one; the rest stay 미인증. Calling again ADDS
+        more bots (UUID-based labels prevent email/student_id/device_uuid
+        collision). Data is NOT cleaned up — call DELETE on the same path to
+        remove ALL bots at once afterwards. Professor-only; course owned by the
+        caller. Tokens are shared across bots (cross_verify does not consume
+        them; per-student uniqueness is DB-enforced).
+      operationId: simulateBots
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SimulateBotsRequest' }
+      responses:
+        '200':
+          description: >
+            Bot population summary (scheduled counts). Bots verify in the
+            background once the session window opens; actual counts appear in
+            the dashboard / aggregate as they complete.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulateBotsResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [courses]
+      summary: Remove all virtual bot students (cascade their data)
+      description: >
+        Deletes every synthetic bot student (and their devices/enrollments/
+        attendance) so the dashboard returns to real data. Professor-only.
+      operationId: cleanupBots
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '200':
+          description: Cleanup result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BotCleanupResult' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ------------------------------------------------------------ sessions
   /sessions:
     post:
@@ -416,6 +544,12 @@ paths:
               properties:
                 course_id: { type: string }
                 window_seconds: { type: integer, default: 60 }
+                week_number:
+                  type: integer
+                  minimum: 1
+                  maximum: 15
+                  nullable: true
+                  description: academic week (1..15주차); optional
       responses:
         '201':
           description: Session created, window open
@@ -474,6 +608,31 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SessionToken' }
+
+  /sessions/{id}/simulate:
+    post:
+      tags: [sessions]
+      summary: Virtual attendance simulation (all verify cases against real path)
+      description: >
+        Creates synthetic students/devices and runs every verification case
+        (normal / window-closed / cross-verify-fail / device-mismatch /
+        duplicate) through the REAL verify path so the professor can confirm
+        each gate behaves as designed. Synthetic data is cleaned up afterwards.
+        Professor-only; session must be owned by the caller.
+      operationId: simulateAttendance
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: Per-case simulation results
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SimulationResult' }
+        '403':
+          description: Not the session owner / not a professor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   # ---------------------------------------------------------- attendance
   /attendance/verify:
@@ -539,6 +698,29 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/AttendanceAggregate' }
 
+  /sessions/{id}/attendance/export:
+    get:
+      tags: [attendance]
+      summary: Export a session's full attendance roster as downloadable JSON
+      description: >
+        Returns every enrolled student with final status (present/absent/pending),
+        verified_at, and correction info, plus session/course context and date.
+        Suitable for archival / later JSON extraction. Professor-only.
+      operationId: exportSessionAttendance
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      responses:
+        '200':
+          description: JSON attendance file
+          content:
+            application/json:
+              schema: { type: object }
+        '403':
+          description: Not the session owner / not a professor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /sessions/{id}/attendance/batch:
     post:
       tags: [attendance]
@@ -603,6 +785,12 @@ paths:
           in: path
           required: true
           schema: { type: string }
+        # EventSource cannot set Authorization headers, so the access token is
+        # accepted as a query param instead (bearer header still works for curl).
+        - name: access_token
+          in: query
+          required: false
+          schema: { type: string }
       responses:
         '200':
           description: text/event-stream of RiskWarning events
@@ -616,7 +804,14 @@ paths:
       summary: Professor live attendance stream (SSE)
       operationId: sseSession
       security: [{ bearerAuth: [] }]
-      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      parameters:
+        - [{ $ref: '#/components/parameters/SessionId' }]
+        # EventSource cannot set Authorization headers, so the access token is
+        # accepted as a query param instead (bearer header still works for curl).
+        - name: access_token
+          in: query
+          required: false
+          schema: { type: string }
       responses:
         '200':
           description: text/event-stream of AttendanceAggregate events
@@ -706,6 +901,35 @@ components:
         password: { type: string, format: password, minLength: 8 }
         role: { $ref: '#/components/schemas/Role' }
         name: { type: string, nullable: true }
+        student_id:
+          type: string
+          nullable: true
+          maxLength: 32
+          description: >
+            학번. Required for role=student (unique across all users); professors
+            must omit it (stored as NULL).
+
+    SendCodeRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          description: >
+            School email (@wku.ac.kr). Validated server-side; case-insensitive.
+
+    VerifyCodeRequest:
+      type: object
+      required: [email, code]
+      properties:
+        email: { type: string }
+        code: { type: string, description: 6-digit verification code }
+
+    VerifyCodeResult:
+      type: object
+      properties:
+        verified: { type: boolean }
+        message: { type: string }
 
     UserOut:
       type: object
@@ -714,6 +938,11 @@ components:
         email: { type: string, format: email }
         role: { $ref: '#/components/schemas/Role' }
         name: { type: string, nullable: true }
+        student_id:
+          type: string
+          nullable: true
+          maxLength: 32
+          description: 학번. Present for students, NULL for professors.
 
     CreateCourseRequest:
       type: object
@@ -830,6 +1059,8 @@ components:
       properties:
         course_id: { type: string }
         student_id: { type: string }
+        student_number: { type: string, nullable: true, description: school student number joined from the user (bots surface as "SIMbot…") }
+        name: { type: string, nullable: true, description: display name joined from the user }
 
     DeviceBinding:
       type: object
@@ -843,6 +1074,7 @@ components:
       properties:
         session_id: { type: string }
         course_id: { type: string }
+        week_number: { type: integer, minimum: 1, maximum: 15, nullable: true, description: academic week (1..15주차) }
         window_open: { type: boolean }
         window_remaining: { type: integer, description: seconds left in auth window }
         status: { type: string, enum: [open, closed] }
@@ -892,6 +1124,78 @@ components:
           $ref: '#/components/schemas/RiskWarning'
           nullable: true
 
+    SimulationCase:
+      type: object
+      description: One verification scenario run during simulation.
+      properties:
+        name: { type: string }
+        expected_rejected: { type: boolean }
+        expected_reason:
+          type: string
+          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          nullable: true
+        rejected: { type: boolean }
+        reason:
+          type: string
+          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          nullable: true
+        passed: { type: boolean, description: True if the actual outcome matched the expected }
+
+    SimulationResult:
+      type: object
+      properties:
+        session_id: { type: string }
+        cases:
+          type: array
+          items: { $ref: '#/components/schemas/SimulationCase' }
+        cleaned_up: { type: boolean }
+
+    SimulateBotsRequest:
+      type: object
+      properties:
+        count:
+          type: integer
+          minimum: 1
+          maximum: 200
+          default: 20
+          description: Number of virtual bot students to create.
+        present_ratio:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+          default: 0.7
+          description: Fraction of bots that successfully verify (present).
+        delay_min:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 600
+          default: 5
+          description: Minimum random delay (seconds) before each bot verifies.
+        delay_max:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 600
+          default: 25
+          description: Maximum random delay (seconds) before each bot verifies.
+
+    SimulateBotsResult:
+      type: object
+      properties:
+        course_id: { type: string }
+        total_bots: { type: integer }
+        present: { type: integer }
+        unverified: { type: integer }
+
+    BotCleanupResult:
+      type: object
+      properties:
+        course_id: { type: string }
+        removed: { type: integer }
+        cleaned_up: { type: boolean }
+
     AttendanceStatus:
       type: string
       enum: [present, absent, pending]
@@ -913,6 +1217,7 @@ components:
         session_id: { type: string }
         course_id: { type: string }
         course_name: { type: string }
+        week_number: { type: integer, minimum: 1, maximum: 15, nullable: true, description: academic week (1..15주차) }
         status: { $ref: '#/components/schemas/AttendanceStatus' }
         verified_at: { type: string, format: date-time, nullable: true }
         session_opened_at: { type: string, format: date-time, nullable: true }
@@ -930,9 +1235,24 @@ components:
         session_id: { type: string }
         total: { type: integer }
         present: { type: integer }
+        absent: { type: integer, description: Students explicitly marked absent (resolved, not 미인증). }
         unverified:
           type: array
-          items: { type: string, description: student_id }
+          description: Students with no present/absent record yet, with readable display fields.
+          items: { $ref: '#/components/schemas/UnverifiedStudent' }
+
+    UnverifiedStudent:
+      type: object
+      description: |
+        A student who has not yet verified for a session. `student_id` is the
+        internal user id (UUID) used as the Delta/batch key; `student_number`
+        is the school 학번 and `name` the display name, both joined from the
+        user so the professor review table shows human-readable values instead
+        of raw UUIDs.
+      properties:
+        student_id: { type: string, description: Internal user id (UUID) — the Delta/batch key. }
+        student_number: { type: string, nullable: true, description: School 학번. }
+        name: { type: string, nullable: true, description: Display name. }
 
     RiskWarning:
       type: object

@@ -155,3 +155,45 @@ async def test_delta_batch_scales_flat_on_noop(client, session, engine):
     assert r.status_code == 200, r.text
     assert counts["insert"] == 0
     assert counts["update"] == 0
+
+
+async def test_batch_close_auto_fails_unverified_to_absent(client, session):
+    """
+    Policy: after a close, the session has ZERO pending records. Every enrolled
+    student with no verdict (no record) is auto-failed to absent — even when the
+    professor submits no explicit deltas for them. 미인증 == 결석 at close time.
+    """
+    prof, course, sess, students = await _prof_course_session(client, session, 3)
+    p_hdr = auth_header(prof.id, "professor")
+
+    # Close with an EMPTY delta list → all 3 unverified students become absent.
+    r = await client.post(
+        f"/sessions/{sess.id}/attendance/batch",
+        json={"deltas": []},
+        headers=p_hdr,
+    )
+    assert r.status_code == 200, r.text
+    agg = r.json()
+    assert agg["present"] == 0
+    assert agg["absent"] == 3
+    assert agg["unverified"] == []  # zero pending after close (policy)
+
+
+async def test_batch_close_preserves_explicit_present(client, session):
+    """
+    Explicit deltas win: a student the professor marks present stays present,
+    while the remaining unverified students are auto-failed to absent.
+    """
+    prof, course, sess, students = await _prof_course_session(client, session, 3)
+    p_hdr = auth_header(prof.id, "professor")
+
+    r = await client.post(
+        f"/sessions/{sess.id}/attendance/batch",
+        json={"deltas": [{"student_id": students[0].id, "status": "present"}]},
+        headers=p_hdr,
+    )
+    assert r.status_code == 200, r.text
+    agg = r.json()
+    assert agg["present"] == 1
+    assert agg["absent"] == 2
+    assert agg["unverified"] == []

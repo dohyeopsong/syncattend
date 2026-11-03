@@ -58,3 +58,35 @@ async def test_get_session_token(client, session):
     data = r.json()
     assert data["qr_token"] and data["audio_nonce"]
     assert data["expires_in"] == 15
+
+
+async def test_create_session_with_week_number(client, session):
+    prof, course = await _prof_with_course(session)
+    hdr = auth_header(prof.id, "professor")
+    r = await client.post(
+        "/sessions",
+        json={"course_id": course.id, "window_seconds": 60, "week_number": 3},
+        headers=hdr,
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["week_number"] == 3
+
+
+async def test_create_session_without_week_number_is_null(client, session):
+    prof, course = await _prof_with_course(session)
+    hdr = auth_header(prof.id, "professor")
+    r = await client.post("/sessions", json={"course_id": course.id}, headers=hdr)
+    assert r.status_code == 201, r.text
+    assert r.json()["week_number"] is None
+
+
+async def test_week_number_out_of_range_rejected(client, session):
+    prof, course = await _prof_with_course(session)
+    hdr = auth_header(prof.id, "professor")
+    for bad in (0, 16, -1):
+        r = await client.post(
+            "/sessions",
+            json={"course_id": course.id, "week_number": bad},
+            headers=hdr,
+        )
+        assert r.status_code == 422, (bad, r.text)

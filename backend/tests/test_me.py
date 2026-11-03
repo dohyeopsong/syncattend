@@ -48,10 +48,18 @@ async def test_get_me_requires_auth(client, session):
 
 async def test_get_me_id_matches_login_flow(client, session):
     """The id from getMe is the one the app should use for /sse/students/{id}."""
+    from conftest import verify_signup_email
+
     email = f"flow_{uuid.uuid4().hex[:6]}@wku.ac.kr"
+    await verify_signup_email(client, email)
     await client.post(
         "/auth/register",
-        json={"email": email, "password": "supersecret", "role": "student"},
+        json={
+            "email": email,
+            "password": "supersecret",
+            "role": "student",
+            "student_id": f"2026{uuid.uuid4().hex[:6]}",
+        },
     )
     login = await client.post(
         "/auth/login", json={"email": email, "password": "supersecret"}

@@ -15,14 +15,25 @@ import uuid
 
 import pytest
 
+from conftest import verify_signup_email
+
 
 # --------------------------------------------------------------------------
 # helpers — thin wrappers that fail loudly with response bodies
 # --------------------------------------------------------------------------
-async def _register(client, email, role, password="supersecret", name=None):
+async def _register(client, email, role, password="supersecret", name=None,
+                    student_id=None):
+    # Team member's flow: verify the email first, then register.
+    await verify_signup_email(client, email)
     r = await client.post(
         "/auth/register",
-        json={"email": email, "password": password, "role": role, "name": name},
+        json={
+            "email": email,
+            "password": password,
+            "role": role,
+            "name": name,
+            "student_id": student_id,
+        },
     )
     assert r.status_code == 201, r.text
     return r.json()
@@ -37,7 +48,7 @@ async def _login(client, email, password="supersecret"):
 
 @pytest.fixture
 def prof_email():
-    return f"prof_{uuid.uuid4().hex[:8]}@university.edu"
+    return f"prof_{uuid.uuid4().hex[:8]}@wku.ac.kr"
 
 
 @pytest.fixture
@@ -62,8 +73,11 @@ async def _bootstrap(client, prof_email, student_emails, window_seconds=120):
     ).json()
 
     students = []
-    for email in student_emails:
-        prof_view = await _register(client, email, "student", name="Stu")
+    for i, email in enumerate(student_emails):
+        prof_view = await _register(
+            client, email, "student", name="Stu",
+            student_id=f"2026{uuid.uuid4().hex[:6]}",
+        )
         s_hdr, login_body = await _login(client, email)
         s_me = (await client.get("/auth/me", headers=s_hdr)).json()
         assert s_me["id"] == prof_view["id"]  # getMe id == registration id
@@ -139,7 +153,7 @@ async def test_e2e_happy_path(client, session, prof_email, student_emails):
     agg = (await client.get(f"/sessions/{sid}/attendance", headers=p_hdr)).json()
     assert agg["present"] == 1
     assert agg["total"] == 2  # two enrolled
-    assert ctx["students"][1]["id"] in agg["unverified"]
+    assert any(u["student_id"] == ctx["students"][1]["id"] for u in agg["unverified"])
 
     # student sees their own history via getMyAttendance
     hist = (await client.get("/me/attendance", headers=student["hdr"])).json()
@@ -269,7 +283,12 @@ async def test_e2e_reject_cross_verify_failed(client, session, prof_email, stude
     assert r.json()["reason"] == "cross_verify_failed"
 
 
-async def test_e2e_reject_nonce_reused(client, session, prof_email, student_emails):
+async def test_e2e_reject_duplicate_same_student_replay(client, session, prof_email, student_emails):
+    """Same student replaying the same token → duplicate_attendance (DB UNIQUE).
+
+    The old single-use nonce guard (nonce_reused) was removed because it
+    blocked all students after the first from scanning the same QR.
+    """
     ctx = await _prepare_verifiable(client, prof_email, student_emails)
     body = {
         "session_id": ctx["sid"],
@@ -281,7 +300,7 @@ async def test_e2e_reject_nonce_reused(client, session, prof_email, student_emai
     assert first.status_code == 200, first.text
     second = await client.post("/attendance/verify", json=body, headers=ctx["student"]["hdr"])
     assert second.status_code == 409
-    assert second.json()["reason"] == "nonce_reused"
+    assert second.json()["reason"] == "duplicate_attendance"
 
 
 async def test_e2e_reject_device_mismatch(client, session, prof_email, student_emails):
