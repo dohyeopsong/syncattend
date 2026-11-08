@@ -23,11 +23,21 @@ class Role(str, Enum):
 class AttendanceStatus(str, Enum):
     present = "present"
     absent = "absent"
+    late = "late"
+    early_leave = "early_leave"
     pending = "pending"
 
 
+class CheckPhase(str, Enum):
+    check_in = "check_in"
+    check_out = "check_out"
+
+
 class VerifyStatus(str, Enum):
-    present = "present"
+    # `verified` = the student passed the CURRENT phase's auth window. The final
+    # attendance status (present/late/early_leave/absent) is only resolved at
+    # batchClose, so a successful verify no longer returns `present`.
+    verified = "verified"
     pending = "pending"
     rejected = "rejected"
 
@@ -320,6 +330,12 @@ class ExtendWindowRequest(BaseModel):
     add_seconds: int = 60
 
 
+class OpenCheckoutRequest(BaseModel):
+    """Open the check_out (end-of-class) auth window. Optional window length;
+    defaults to the session's original window_seconds."""
+    window_seconds: int | None = Field(default=None, ge=1, le=3600)
+
+
 class SessionOut(BaseModel):
     session_id: str
     course_id: str
@@ -327,7 +343,7 @@ class SessionOut(BaseModel):
     schedule_id: str | None = None
     window_open: bool
     window_remaining: int
-    status: str
+    phase: str
 
 
 class SessionToken(BaseModel):
@@ -358,6 +374,9 @@ class VerifyResult(BaseModel):
     cross_verified: bool
     device_matched: bool
     reason: VerifyReason | None = None
+    # Which phase this verify attempt counted towards (check_in / check_out).
+    # Set on a successful verify; None on rejection.
+    check_phase: CheckPhase | None = None
     risk_warning: RiskWarning | None = None
 
 
@@ -366,7 +385,8 @@ class AttendanceRecord(BaseModel):
     session_id: str
     student_id: str
     status: AttendanceStatus
-    verified_at: datetime | None = None
+    check_in_verified_at: datetime | None = None
+    check_out_verified_at: datetime | None = None
 
 
 class MyAttendanceItem(BaseModel):
@@ -378,7 +398,8 @@ class MyAttendanceItem(BaseModel):
     course_name: str
     week_number: int | None = None
     status: AttendanceStatus
-    verified_at: datetime | None = None
+    check_in_verified_at: datetime | None = None
+    check_out_verified_at: datetime | None = None
     session_opened_at: datetime | None = None
 
 
@@ -409,6 +430,8 @@ class AttendanceAggregate(BaseModel):
     total: int
     present: int
     absent: int = 0
+    late: int = 0
+    early_leave: int = 0
     unverified: list[UnverifiedStudent] = Field(default_factory=list)
 
 

@@ -26,7 +26,7 @@ export function RealtimeRiskPanel() {
   const unsubscribeSse = useAttendanceStore((s) => s.unsubscribeSse);
 
   const sessionId = session?.session_id;
-  const isOpen = session?.status === "open";
+  const isOpen = session?.phase !== "closed";
 
   useEffect(() => {
     if (sessionId && isOpen) {
@@ -36,14 +36,15 @@ export function RealtimeRiskPanel() {
   }, [sessionId, isOpen, subscribeSse, unsubscribeSse]);
 
   // Single source of truth for derived figures (see lib/status.ts).
-  const { total, present, unverified, unverifiedShare, unverifiedRate } =
+  const { total, present, unverified, unverifiedFinal, unverifiedFinalRate } =
     deriveAttendanceStats(aggregate);
+  const unverifiedShare = total > 0 ? unverifiedFinal / total : 0;
 
   const risk: { level: "info" | "warning" | "danger"; message: string } =
     unverifiedShare >= 0.5
       ? {
           level: "danger",
-          message: `미인증 비율이 ${unverifiedRate}%입니다. 인증 창 연장 또는 재송출을 검토하세요.`,
+          message: `미인증 비율이 ${unverifiedFinalRate}%입니다. 인증 창 연장 또는 재송출을 검토하세요.`,
         }
       : unverifiedShare >= 0.2
         ? {

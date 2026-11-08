@@ -4,6 +4,7 @@ import {
   createSession as apiCreate,
   extendWindow as apiExtend,
   getSessionToken as apiToken,
+  openCheckout as apiCheckout,
 } from "@/api/client";
 import type { Session, SessionToken } from "@/api/types";
 
@@ -17,6 +18,8 @@ interface SessionState {
 
   openSession: (courseId: string, windowSeconds?: number) => Promise<Session | null>;
   extend: (addSeconds?: number) => Promise<void>;
+  /** Open the check_out (end-of-class) auth window: check_in → check_out. */
+  openCheckout: (windowSeconds?: number) => Promise<void>;
   close: () => Promise<void>;
   refreshToken: () => Promise<void>;
   startTokenPolling: (intervalMs?: number) => void;
@@ -56,6 +59,19 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     try {
       const session = await apiExtend(s.session_id, addSeconds);
       set({ session });
+    } catch (e) {
+      set({ error: toMessage(e) });
+    }
+  },
+
+  openCheckout: async (windowSeconds = 60) => {
+    const s = get().session;
+    if (!s) return;
+    try {
+      const session = await apiCheckout(s.session_id, windowSeconds);
+      set({ session });
+      // 새 인증 창이 열렸으니 토큰/카운트다인 동기화.
+      await get().refreshToken();
     } catch (e) {
       set({ error: toMessage(e) });
     }

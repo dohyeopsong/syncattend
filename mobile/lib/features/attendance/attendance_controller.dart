@@ -31,6 +31,8 @@ class AttendanceState {
     this.secondsRemaining = AppConfig.defaultWindowSeconds,
     this.result,
     this.error,
+    this.checkInDone = false,
+    this.checkOutDone = false,
   });
 
   final VerifyPhase phase;
@@ -41,14 +43,26 @@ class AttendanceState {
   final VerifyResult? result;
   final String? error;
 
+  /// True once a verify returned `verified` for the check-in (수업 시작) phase.
+  /// Preserved across the in-screen "종료 인증하기" restart so the second-phase
+  /// capture knows the first phase is already satisfied.
+  final bool checkInDone;
+
+  /// True once a verify returned `verified` for the check-out (수업 종료) phase.
+  final bool checkOutDone;
+
   bool get hasQr => qrToken != null && qrToken!.isNotEmpty;
   bool get hasAudio => audioNonce != null && audioNonce!.isNotEmpty;
   bool get bothCaptured => hasQr && hasAudio;
 
+  /// Both dual-auth phases satisfied — the terminal success state.
+  bool get bothChecksDone => checkInDone && checkOutDone;
+
   /// Returns a copy with the given overrides. Every nullable field follows the
   /// same rule via the [_unset] sentinel: omit the argument to preserve the
   /// current value, or pass `null` explicitly to clear it. Non-nullable fields
-  /// ([phase], [secondsRemaining]) keep the usual `?? this.x` form.
+  /// ([phase], [secondsRemaining], [checkInDone], [checkOutDone]) keep the
+  /// usual `?? this.x` form.
   AttendanceState copyWith({
     VerifyPhase? phase,
     int? secondsRemaining,
@@ -57,6 +71,8 @@ class AttendanceState {
     Object? sessionId = _unset,
     Object? result = _unset,
     Object? error = _unset,
+    bool? checkInDone,
+    bool? checkOutDone,
   }) =>
       AttendanceState(
         phase: phase ?? this.phase,
@@ -71,6 +87,8 @@ class AttendanceState {
             ? this.result
             : result as VerifyResult?,
         error: identical(error, _unset) ? this.error : error as String?,
+        checkInDone: checkInDone ?? this.checkInDone,
+        checkOutDone: checkOutDone ?? this.checkOutDone,
       );
 }
 
@@ -210,7 +228,21 @@ class AttendanceController extends StateNotifier<AttendanceState> {
         return;
       }
 
-      state = state.copyWith(phase: VerifyPhase.done, result: result);
+      // Record which dual-auth phase just succeeded so the UI can show
+      // 시작/종료 인증 완료 separately and offer the second-phase capture.
+      // These flags accumulate (never reset on a failure) so a retry of the
+      // SAME phase after a verified result keeps the earlier success.
+      final phaseDone = result.status == VerifyStatus.verified
+          ? result.checkPhase
+          : null;
+      state = state.copyWith(
+        phase: VerifyPhase.done,
+        result: result,
+        checkInDone:
+            state.checkInDone || phaseDone == CheckPhase.checkIn,
+        checkOutDone:
+            state.checkOutDone || phaseDone == CheckPhase.checkOut,
+      );
     } on ApiError catch (e) {
       state = state.copyWith(phase: VerifyPhase.error, error: e.detail);
     } catch (e) {
@@ -225,13 +257,28 @@ class AttendanceController extends StateNotifier<AttendanceState> {
     state = const AttendanceState();
   }
 
-  /// Full retry: clear state AND begin a fresh capture (mic + countdown). The
-  /// bare [reset] only zeroed the state, which left the mic/countdown stopped
-  /// so "다시 시도" appeared to do nothing — this is the one the UI must call.
+  /// Full retry: clear the CURRENT capture state AND begin a fresh capture
+  /// (mic + countdown), while PRESERVING [checkInDone]/[checkOutDone]. The bare
+  /// [reset] only zeroed the state, which left the mic/countdown stopped so
+  /// "다시 시도" appeared to do nothing — this is the one the UI must call. It is
+  /// also the entry point for the second-phase "종료 인증하기" capture, so the
+  /// first-phase success must survive the restart.
   Future<void> restart() async {
-    await reset();
+    _countdown?.cancel();
+    await _audio.stop();
+    await _audioSub?.cancel();
     _crossVerifyRetries = 0;
-    await startCapture();
+    state = state.copyWith(
+      phase: VerifyPhase.capturing,
+      secondsRemaining: AppConfig.defaultWindowSeconds,
+      qrToken: null,
+      audioNonce: null,
+      sessionId: null,
+      result: null,
+      error: null,
+    );
+    _startCountdown();
+    await _startAudioCapture();
   }
 
   @override

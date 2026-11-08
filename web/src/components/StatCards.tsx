@@ -9,6 +9,8 @@ import {
   XCircle,
   HelpCircle,
   MousePointerClick,
+  Timer,
+  LogOut,
 } from "lucide-react";
 
 // Dashboard stat cards (design guide §3): 4 across — 출석 / 대기 / 결석 / 미인증.
@@ -21,7 +23,7 @@ export function StatCards() {
   const pendingDeltas = useAttendanceStore((s) => s.pendingDeltas);
 
   // Single source of truth for every derived figure (see lib/status.ts).
-  const { total, present, unverified, pendingCorrections, absentCorrections, presentRate } =
+  const { total, present, absent, late, earlyLeave, unverified, pendingCorrections, presentRate } =
     deriveAttendanceStats(aggregate, pendingDeltas);
 
   // Session open but aggregate not yet fetched → show skeletons so numbers
@@ -30,8 +32,16 @@ export function StatCards() {
 
   const stats = [
     { label: "출석", value: present, Icon: CheckCircle2, tone: "text-success", bg: "bg-success/10" },
-    { label: "대기", value: pendingCorrections, Icon: Clock, tone: "text-warning", bg: "bg-warning/10" },
-    { label: "결석", value: absentCorrections, Icon: XCircle, tone: "text-destructive", bg: "bg-destructive/10" },
+    { label: "지각", value: late, Icon: Timer, tone: "text-warning", bg: "bg-warning/10" },
+    { label: "조퇴", value: earlyLeave, Icon: LogOut, tone: "text-warning", bg: "bg-warning/10" },
+    { label: "결석", value: absent, Icon: XCircle, tone: "text-destructive", bg: "bg-destructive/10" },
+    {
+      label: "대기",
+      value: pendingCorrections,
+      Icon: Clock,
+      tone: "text-muted-foreground",
+      bg: "bg-muted",
+    },
     {
       label: "미인증",
       value: unverified,
@@ -42,7 +52,7 @@ export function StatCards() {
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
       {stats.map(({ label, value, Icon, tone, bg }) => (
         <Card key={label} className="p-5 transition-shadow hover:shadow-soft-md">
           <div className="flex items-center gap-3">

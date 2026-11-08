@@ -5,7 +5,7 @@ import 'package:syncattend_mobile/models/contract_models.dart';
 
 VerifyResult _result(VerifyStatus status) => VerifyResult(
       status: status,
-      crossVerified: status == VerifyStatus.present,
+      crossVerified: status == VerifyStatus.verified,
       deviceMatched: true,
       reason: status == VerifyStatus.rejected
           ? VerifyReason.crossVerifyFailed
@@ -17,7 +17,7 @@ void main() {
     test('present success hides retry (prevents duplicate verify / 409)', () {
       final state = AttendanceState(
         phase: VerifyPhase.done,
-        result: _result(VerifyStatus.present),
+        result: _result(VerifyStatus.verified),
       );
       expect(shouldShowRetry(state), isFalse);
     });

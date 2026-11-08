@@ -8,6 +8,7 @@ import {
 import { useCoursesStore, type SearchField } from "@/store/courses";
 import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
+import { unlockAudio } from "@/lib/ultrasonicEmitter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -588,6 +589,15 @@ export function CoursePanel() {
 
   async function onOpen() {
     if (!selected) return;
+    // Unlock the AudioContext INSIDE this click gesture, before any network
+    // request, and AWAIT it (never `void`). Safari only permits audio output
+    // from a context that finished resume() within the gesture; if the gesture
+    // expires first (e.g. `void unlockAudio()` then `await openSession()`),
+    // Safari silently blocks ALL output — even audible 1kHz tones — while still
+    // reporting state="running". Chrome is lenient. Awaiting here guarantees
+    // resume() + the silent-prime buffer finish before the network round-trips
+    // consume the gesture window.
+    await unlockAudio();
     resetAttendance();
     await openSession(selected, windowSeconds);
   }
@@ -856,7 +866,10 @@ export function CoursePanel() {
           </div>
           <Button
             className="flex-1"
-            disabled={!selected || session?.status === "open"}
+            // Disable only while a session is actively open (check_in/check_out).
+            // When session is null (never opened / reset) or closed, the button
+            // must stay ENABLED so the professor can open a new one.
+            disabled={!selected || (session != null && session.phase !== "closed")}
             onClick={() => void onOpen()}
           >
             <Play className="h-4 w-4" />
@@ -864,7 +877,7 @@ export function CoursePanel() {
           </Button>
         </div>
 
-        {session?.status === "open" && (
+        {session?.phase !== "closed" && (
           <Button
             variant="ghost"
             className="w-full"

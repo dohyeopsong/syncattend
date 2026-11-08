@@ -43,7 +43,8 @@ describe("nonceToNibbles — full hex round-trip", () => {
     const samplesPerSymbol = Math.floor(
       (DEFAULT_PROTOCOL.sampleRate * DEFAULT_PROTOCOL.symbolMs) / 1000,
     );
-    // [marker] + 8 nibbles = 9 symbols
-    expect(pcm.length).toBe(9 * samplesPerSymbol);
+    // [marker] + 8 nibbles = 9 symbols, plus the 8 ms inter-frame gap.
+    const gapLen = Math.floor(DEFAULT_PROTOCOL.sampleRate * 0.008);
+    expect(pcm.length).toBe(9 * samplesPerSymbol + gapLen);
   });
 });

@@ -108,18 +108,35 @@ class VerifyRequest {
       };
 }
 
-enum VerifyStatus { present, pending, rejected, unknown }
+enum VerifyStatus { verified, pending, rejected, unknown }
 
 VerifyStatus _verifyStatusFromString(String? v) {
   switch (v) {
-    case 'present':
-      return VerifyStatus.present;
+    case 'verified':
+      return VerifyStatus.verified;
     case 'pending':
       return VerifyStatus.pending;
     case 'rejected':
       return VerifyStatus.rejected;
     default:
       return VerifyStatus.unknown;
+  }
+}
+
+/// #/components/schemas/CheckPhase — which dual-auth phase a verify completed.
+/// The backend derives this from the session's current phase (check_in before
+/// class, check_out after class); the app uses it to show 시작/종료 인증 완료
+/// separately and to decide whether to offer the second-phase capture.
+enum CheckPhase { checkIn, checkOut, unknown }
+
+CheckPhase _checkPhaseFromString(String? v) {
+  switch (v) {
+    case 'check_in':
+      return CheckPhase.checkIn;
+    case 'check_out':
+      return CheckPhase.checkOut;
+    default:
+      return CheckPhase.unknown;
   }
 }
 
@@ -157,6 +174,7 @@ class VerifyResult {
     required this.crossVerified,
     required this.deviceMatched,
     required this.reason,
+    this.checkPhase,
     this.riskWarning,
   });
 
@@ -164,6 +182,10 @@ class VerifyResult {
   final bool crossVerified;
   final bool deviceMatched;
   final VerifyReason reason;
+
+  /// Which dual-auth phase this verify completed (null when not verified or
+  /// when the backend omits it). Drives the 시작/종료 인증 완료 UI.
+  final CheckPhase? checkPhase;
   final RiskWarning? riskWarning;
 
   factory VerifyResult.fromJson(Map<String, dynamic> json) => VerifyResult(
@@ -171,6 +193,9 @@ class VerifyResult {
         crossVerified: json['cross_verified'] as bool? ?? false,
         deviceMatched: json['device_matched'] as bool? ?? false,
         reason: _verifyReasonFromString(json['reason'] as String?),
+        checkPhase: json['check_phase'] == null
+            ? null
+            : _checkPhaseFromString(json['check_phase'] as String?),
         riskWarning: json['risk_warning'] != null
             ? RiskWarning.fromJson(
                 json['risk_warning'] as Map<String, dynamic>)
@@ -178,7 +203,14 @@ class VerifyResult {
       );
 }
 
-enum AttendanceStatus { present, absent, pending, unknown }
+enum AttendanceStatus {
+  present,
+  absent,
+  late,
+  earlyLeave,
+  pending,
+  unknown
+}
 
 AttendanceStatus attendanceStatusFromString(String? v) {
   switch (v) {
@@ -186,6 +218,10 @@ AttendanceStatus attendanceStatusFromString(String? v) {
       return AttendanceStatus.present;
     case 'absent':
       return AttendanceStatus.absent;
+    case 'late':
+      return AttendanceStatus.late;
+    case 'early_leave':
+      return AttendanceStatus.earlyLeave;
     case 'pending':
       return AttendanceStatus.pending;
     default:
@@ -200,14 +236,20 @@ class AttendanceRecord {
     required this.sessionId,
     required this.studentId,
     required this.status,
-    this.verifiedAt,
+    this.checkInVerifiedAt,
+    this.checkOutVerifiedAt,
   });
 
   final String recordId;
   final String sessionId;
   final String studentId;
   final AttendanceStatus status;
-  final DateTime? verifiedAt;
+
+  /// When the student passed the check-in (수업 시작) phase.
+  final DateTime? checkInVerifiedAt;
+
+  /// When the student passed the check-out (수업 종료) phase.
+  final DateTime? checkOutVerifiedAt;
 
   factory AttendanceRecord.fromJson(Map<String, dynamic> json) =>
       AttendanceRecord(
@@ -215,8 +257,11 @@ class AttendanceRecord {
         sessionId: json['session_id'] as String? ?? '',
         studentId: json['student_id'] as String? ?? '',
         status: attendanceStatusFromString(json['status'] as String?),
-        verifiedAt: json['verified_at'] != null
-            ? DateTime.tryParse(json['verified_at'] as String)
+        checkInVerifiedAt: json['check_in_verified_at'] != null
+            ? DateTime.tryParse(json['check_in_verified_at'] as String)
+            : null,
+        checkOutVerifiedAt: json['check_out_verified_at'] != null
+            ? DateTime.tryParse(json['check_out_verified_at'] as String)
             : null,
       );
 }
@@ -352,7 +397,8 @@ class MyAttendanceItem {
     required this.courseName,
     required this.status,
     this.weekNumber,
-    this.verifiedAt,
+    this.checkInVerifiedAt,
+    this.checkOutVerifiedAt,
     this.sessionOpenedAt,
   });
 
@@ -362,7 +408,12 @@ class MyAttendanceItem {
   final String courseName;
   final int? weekNumber; // 1..15주차 (nullable for legacy sessions)
   final AttendanceStatus status;
-  final DateTime? verifiedAt;
+
+  /// When the student passed the check-in (수업 시작) phase.
+  final DateTime? checkInVerifiedAt;
+
+  /// When the student passed the check-out (수업 종료) phase.
+  final DateTime? checkOutVerifiedAt;
   final DateTime? sessionOpenedAt;
 
   factory MyAttendanceItem.fromJson(Map<String, dynamic> json) =>
@@ -373,8 +424,11 @@ class MyAttendanceItem {
         courseName: json['course_name'] as String? ?? '',
         weekNumber: json['week_number'] as int?,
         status: attendanceStatusFromString(json['status'] as String?),
-        verifiedAt: json['verified_at'] != null
-            ? DateTime.tryParse(json['verified_at'] as String)
+        checkInVerifiedAt: json['check_in_verified_at'] != null
+            ? DateTime.tryParse(json['check_in_verified_at'] as String)
+            : null,
+        checkOutVerifiedAt: json['check_out_verified_at'] != null
+            ? DateTime.tryParse(json['check_out_verified_at'] as String)
             : null,
         sessionOpenedAt: json['session_opened_at'] != null
             ? DateTime.tryParse(json['session_opened_at'] as String)

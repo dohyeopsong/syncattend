@@ -256,7 +256,11 @@ class _AttendanceTable extends StatelessWidget {
         items.where((e) => e.status == AttendanceStatus.present).length;
     final absent =
         items.where((e) => e.status == AttendanceStatus.absent).length;
-    final pending = items.length - present - absent;
+    final late =
+        items.where((e) => e.status == AttendanceStatus.late).length;
+    final earlyLeave =
+        items.where((e) => e.status == AttendanceStatus.earlyLeave).length;
+    final pending = items.length - present - absent - late - earlyLeave;
 
     return ListView(
       controller: scrollController,
@@ -272,6 +276,16 @@ class _AttendanceTable extends StatelessWidget {
             const SizedBox(width: 8),
             _SummaryChip(
                 label: '결석', count: absent, color: AppColors.danger),
+            if (late > 0) ...[
+              const SizedBox(width: 8),
+              _SummaryChip(
+                  label: '지각', count: late, color: AppColors.warning),
+            ],
+            if (earlyLeave > 0) ...[
+              const SizedBox(width: 8),
+              _SummaryChip(
+                  label: '조퇴', count: earlyLeave, color: AppColors.warning),
+            ],
             if (pending > 0) ...[
               const SizedBox(width: 8),
               _SummaryChip(
@@ -303,6 +317,8 @@ class _AttendanceTable extends StatelessWidget {
   AttendanceStatus _worse(AttendanceStatus? a, AttendanceStatus b) {
     const rank = {
       AttendanceStatus.present: 0,
+      AttendanceStatus.late: 1,
+      AttendanceStatus.earlyLeave: 1,
       AttendanceStatus.pending: 1,
       AttendanceStatus.unknown: 1,
       AttendanceStatus.absent: 2,
@@ -439,20 +455,33 @@ class _WeekTableRow extends StatelessWidget {
                   color: AppColors.foreground),
             ),
           ),
-          // 출석 열
+          // 출석 열 — present ✓, late/early_leave show their label (attended
+          // but imperfect), pending/unknown show 대기.
           Expanded(
             flex: 2,
             child: Center(
               child: status == AttendanceStatus.present
                   ? const _Mark(Icons.check, AppColors.success)
-                  : status == AttendanceStatus.pending ||
-                          status == AttendanceStatus.unknown
-                      ? const Text('대기',
+                  : status == AttendanceStatus.late
+                      ? const Text('지각',
                           style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                               color: AppColors.warning))
-                      : const SizedBox.shrink(),
+                      : status == AttendanceStatus.earlyLeave
+                          ? const Text('조퇴',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.warning))
+                          : status == AttendanceStatus.pending ||
+                                  status == AttendanceStatus.unknown
+                              ? const Text('대기',
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.warning))
+                              : const SizedBox.shrink(),
             ),
           ),
           // 결석 열
@@ -525,6 +554,10 @@ class _SummaryChip extends StatelessWidget {
         return AttendanceStatus.present;
       case '결석':
         return AttendanceStatus.absent;
+      case '지각':
+        return AttendanceStatus.late;
+      case '조퇴':
+        return AttendanceStatus.earlyLeave;
       default:
         return AttendanceStatus.pending;
     }

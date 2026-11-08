@@ -70,7 +70,7 @@ void main() {
         deviceUuid: 'uuid-a',
       );
       final first = await api.verifyAttendance(req);
-      expect(first.status, VerifyStatus.present);
+      expect(first.status, VerifyStatus.verified);
 
       final second = await api.verifyAttendance(req);
       expect(second.status, VerifyStatus.rejected);

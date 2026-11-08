@@ -149,7 +149,7 @@ function makeBackend() {
         course_id: "course-1",
         window_open: true,
         window_remaining: 60,
-        status: "open",
+        phase: "check_in",
       },
     }),
     "GET /sessions/sess-1/token": () => ({
@@ -172,7 +172,7 @@ function makeBackend() {
           course_id: "course-1",
           window_open: true,
           window_remaining: state.windowRemaining,
-          status: "open",
+          phase: "check_in",
         },
       };
     },
@@ -186,7 +186,7 @@ function makeBackend() {
           course_id: "course-1",
           window_open: false,
           window_remaining: 0,
-          status: "closed",
+          phase: "closed",
         },
       };
     },
@@ -196,6 +196,9 @@ function makeBackend() {
         session_id: "sess-1",
         total: 3,
         present: 1,
+        absent: 0,
+        late: 0,
+        early_leave: 0,
         unverified: ["stu-2", "stu-3"],
       },
     }),
@@ -206,7 +209,8 @@ function makeBackend() {
         session_id: "sess-1",
         student_id: "stu-2",
         status: b.status,
-        verified_at: null,
+        check_in_verified_at: null,
+        check_out_verified_at: null,
       },
     }),
     "POST /sessions/sess-1/attendance/batch": (b) => {
@@ -217,6 +221,9 @@ function makeBackend() {
           session_id: "sess-1",
           total: 3,
           present: 1 + b.deltas.filter((d: any) => d.status === "present").length,
+          absent: b.deltas.filter((d: any) => d.status === "absent").length,
+          late: 0,
+          early_leave: 0,
           unverified: [],
         },
       };
@@ -323,7 +330,7 @@ describe("professor happy-path E2E (web client + stores)", () => {
     expect(agg.unverified).toEqual(["stu-2", "stu-3"]);
     // privacy: aggregate exposes only counts + student ids, no location fields
     expect(Object.keys(agg).sort()).toEqual(
-      ["present", "session_id", "total", "unverified"].sort(),
+      ["absent", "early_leave", "late", "present", "session_id", "total", "unverified"].sort(),
     );
 
     // 4) correct one record + queue delta + batch close
@@ -343,7 +350,7 @@ describe("professor happy-path E2E (web client + stores)", () => {
     await useSessionStore.getState().extend(60);
     expect(useSessionStore.getState().session?.window_remaining).toBe(120);
     await useSessionStore.getState().close();
-    expect(useSessionStore.getState().session?.status).toBe("closed");
+    expect(useSessionStore.getState().session?.phase).toBe("closed");
   });
 });
 

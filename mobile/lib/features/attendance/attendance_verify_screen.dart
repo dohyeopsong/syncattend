@@ -308,7 +308,7 @@ class _DefenseSteps extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final present =
-        state.phase == VerifyPhase.done && state.result?.status == VerifyStatus.present;
+        state.phase == VerifyPhase.done && state.result?.status == VerifyStatus.verified;
     // Step statuses derived from the (unchanged) controller state.
     final qrDone = state.hasQr;
     final audioDone = state.hasAudio;
@@ -474,17 +474,26 @@ class _StepNode extends StatelessWidget {
 ///
 /// Retry is offered for unresolved/failed outcomes:
 ///   • [VerifyPhase.error] — client/network error before a result, or
-///   • [VerifyPhase.done] with a result that is NOT [VerifyStatus.present]
+///   • [VerifyPhase.done] with a result that is NOT [VerifyStatus.verified]
 ///     (i.e. pending → awaiting professor, rejected → can re-attempt).
 ///
-/// A successful [VerifyStatus.present] intentionally hides retry: re-capturing
-/// after success only produces duplicate verifies (backend 409s).
+/// A successful [VerifyStatus.verified] intentionally hides retry: re-capturing
+/// after a verified result only produces duplicate verifies (backend 409s).
+/// When check-in is verified but check-out is not, [shouldShowCheckoutCta]
+/// surfaces the "종료 인증하기" CTA instead (a new capture, not a retry).
 bool shouldShowRetry(AttendanceState state) {
   if (state.phase == VerifyPhase.error) return true;
   if (state.phase == VerifyPhase.done) {
-    return state.result?.status != VerifyStatus.present;
+    return state.result?.status != VerifyStatus.verified;
   }
   return false;
+}
+
+/// The "종료 인증하기" CTA shows after a verified check-in, while check-out is
+/// still pending. It re-enters capture (via [restart]) for the second phase.
+bool shouldShowCheckoutCta(AttendanceState state) {
+  if (state.phase != VerifyPhase.done) return false;
+  return state.checkInDone && !state.checkOutDone;
 }
 
 /// Below the ring: submit spinner, soft error text, result detail, and the
@@ -497,6 +506,7 @@ class _ResultPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final showRetry = shouldShowRetry(state);
+    final showCheckout = shouldShowCheckoutCta(state);
     return Container(
       decoration: softCardDecoration(),
       child: Padding(
@@ -533,6 +543,23 @@ class _ResultPanel extends StatelessWidget {
                 label: const Text('다시 시도'),
               ),
             ],
+            // Verified check-in but check-out still pending → offer the
+            // second-phase capture. This is NOT a retry (check-in already
+            // succeeded); it re-enters capture for the 종료 인증.
+            if (showCheckout) ...[
+              const SizedBox(height: 4),
+              const Text(
+                '시작 인증이 완료되었습니다. 수업 종료 후 종료 인증을 진행하세요.',
+                style: TextStyle(fontSize: 12, color: AppColors.mutedForeground),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: () => onRetry(),
+                icon: const Icon(Icons.logout),
+                label: const Text('종료 인증하기'),
+              ),
+            ],
           ],
         ),
       ),
@@ -546,8 +573,12 @@ class _ResultDetail extends StatelessWidget {
 
   String get _statusText {
     switch (result.status) {
-      case VerifyStatus.present:
-        return '출석 처리되었습니다';
+      case VerifyStatus.verified:
+        // Phase-aware headline: 시작 인증 완료 / 종료 인증 완료. When the backend
+        // omits check_phase, fall back to a neutral "인증 완료".
+        if (result.checkPhase == CheckPhase.checkOut) return '종료 인증 완료';
+        if (result.checkPhase == CheckPhase.checkIn) return '시작 인증 완료';
+        return '인증 완료';
       case VerifyStatus.pending:
         return '대기 중 (교수 확인 필요)';
       case VerifyStatus.rejected:
@@ -559,7 +590,7 @@ class _ResultDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final present = result.status == VerifyStatus.present;
+    final present = result.status == VerifyStatus.verified;
     final pending = result.status == VerifyStatus.pending;
     final rejected = result.status == VerifyStatus.rejected;
     // present=green, pending=amber, rejected=amber (retry) — never red "absent".

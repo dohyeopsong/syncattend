@@ -50,7 +50,8 @@ async def test_verify_success(client, session):
     )
     assert r.status_code == 200, r.text
     data = r.json()
-    assert data["status"] == "present"
+    assert data["status"] == "verified"
+    assert data["check_phase"] == "check_in"
     assert data["cross_verified"] is True
     assert data["device_matched"] is True
     assert data["reason"] is None
@@ -163,7 +164,7 @@ async def test_multiple_students_same_token_all_pass(client, session):
     # All 5 must succeed — same token, different students/devices.
     for i, r in enumerate(results):
         assert r.status_code == 200, f"student {i} failed: {r.text}"
-        assert r.json()["status"] == "present"
+        assert r.json()["status"] == "verified"
 
 
 async def test_reject_device_mismatch(client, session):
@@ -231,6 +232,26 @@ async def test_aggregate_and_delta_batch(client, session):
     assert agg["total"] == 1
     assert agg["unverified"] == []
 
+    # open the check_out window and have the student verify again, so the
+    # student passes BOTH phases (→ present at close time, not early_leave).
+    await client.post(f"/sessions/{sid}/checkout", json={"window_seconds": 60}, headers=p_hdr)
+    tok2 = (await client.get(f"/sessions/{sid}/token", headers=p_hdr)).json()
+    await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": sid,
+            "qr_token": tok2["qr_token"],
+            "audio_nonce": tok2["audio_nonce"],
+            "device_uuid": ctx["student_uuid"],
+        },
+        headers=ctx["s_hdr"],
+    )
+
+    agg = (await client.get(f"/sessions/{sid}/attendance", headers=p_hdr)).json()
+    assert agg["present"] == 1
+    assert agg["total"] == 1
+    assert agg["unverified"] == []
+
     # add an enrolled but absent student, then delta-close them as absent
     absent = await seed_user(session, f"a_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student")
     await seed_enrollment(session, ctx["course"].id, absent.id)
@@ -246,8 +267,9 @@ async def test_aggregate_and_delta_batch(client, session):
         headers=p_hdr,
     )
     assert r.status_code == 200
-    # present count unchanged; absent now recorded
+    # student passed both phases → present; absent student → absent
     assert r.json()["present"] == 1
+    assert r.json()["absent"] == 1
 
 
 # --------------------------------------------------------------------------

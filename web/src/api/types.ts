@@ -83,8 +83,8 @@ export interface Session {
   session_id: string;
   course_id: string;
   window_open: boolean;
-  window_remaining: number; // seconds
-  status: "open" | "closed";
+  window_remaining: number; // seconds left in the currently active auth window
+  phase: "check_in" | "check_out" | "closed";
 }
 
 export interface SessionToken {
@@ -96,14 +96,36 @@ export interface SessionToken {
   window_remaining: number;
 }
 
-export type AttendanceStatus = "present" | "absent" | "pending";
+// Final status, resolved at batchClose from the two timestamps:
+// present (both), late (check_out only), early_leave (check_in only),
+// absent (neither). `pending` until the session is closed.
+export type AttendanceStatus =
+  | "present"
+  | "absent"
+  | "late"
+  | "early_leave"
+  | "pending";
+
+export type CheckPhase = "check_in" | "check_out";
+
+export type VerifyStatus = "verified" | "pending" | "rejected";
+
+export interface VerifyResult {
+  status: VerifyStatus;
+  cross_verified: boolean;
+  device_matched: boolean;
+  reason: VerifyReason | null;
+  check_phase: CheckPhase | null; // set on success, null on rejection
+  risk_warning?: { level: "info" | "warning" | "danger"; absences: number; message: string } | null;
+}
 
 export interface AttendanceRecord {
   record_id: string;
   session_id: string;
   student_id: string;
   status: AttendanceStatus;
-  verified_at: string | null;
+  check_in_verified_at: string | null;
+  check_out_verified_at: string | null;
 }
 
 export interface AttendanceDelta {
@@ -122,6 +144,8 @@ export interface AttendanceAggregate {
   total: number;
   present: number;
   absent: number;
+  late: number; // resolved (closed session) only
+  early_leave: number; // resolved (closed session) only
   unverified: UnverifiedStudent[]; // readable student summaries, not raw UUIDs
 }
 

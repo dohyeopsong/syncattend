@@ -107,7 +107,7 @@ async def verify_bot_for_course(
             sess = (
                 await db.execute(
                     select(Session)
-                    .where(Session.course_id == course_id, Session.status == "open")
+                    .where(Session.course_id == course_id, Session.phase != "closed")
                     .order_by(Session.window_expires_at.desc())
                 )
             ).scalars().first()

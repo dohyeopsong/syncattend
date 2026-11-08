@@ -20,6 +20,7 @@ from app.redis_client import get_redis
 from app.schemas import (
     CreateSessionRequest,
     ExtendWindowRequest,
+    OpenCheckoutRequest,
     SessionOut,
     SessionToken,
     SimulationCase,
@@ -36,7 +37,7 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 
 def _window_state(session: Session) -> tuple[bool, int]:
     """Return (window_open, window_remaining_seconds)."""
-    if session.status != "open":
+    if session.phase == "closed":
         return False, 0
     remaining = int((as_aware(session.window_expires_at) - _now()).total_seconds())
     if remaining <= 0:
@@ -53,7 +54,7 @@ def _to_out(session: Session) -> SessionOut:
         schedule_id=session.schedule_id,
         window_open=is_open,
         window_remaining=remaining,
-        status=session.status,
+        phase=session.phase,
     )
 
 
@@ -97,7 +98,7 @@ async def create_session(
         course_id=body.course_id,
         week_number=body.week_number,
         schedule_id=body.schedule_id,
-        status="open",
+        phase="check_in",
         window_opened_at=now,
         window_expires_at=now + timedelta(seconds=window),
     )
@@ -117,11 +118,52 @@ async def extend_window(
     db: AsyncSession = Depends(get_db),
 ) -> SessionOut:
     session = await _load_owned_session(db, id, prof.id)
+    if session.phase == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="session is closed"
+        )
     add_seconds = (body.add_seconds if body else None) or get_settings().auth_window_seconds
     now = _now()
     base = max(as_aware(session.window_expires_at), now)
-    session.status = "open"
     session.window_expires_at = base + timedelta(seconds=add_seconds)
+    await db.commit()
+    await db.refresh(session)
+    return _to_out(session)
+
+
+@router.post(
+    "/{id}/checkout", response_model=SessionOut, operation_id="openCheckout"
+)
+async def open_checkout(
+    id: str,
+    body: OpenCheckoutRequest | None = None,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> SessionOut:
+    """Open the check_out (end-of-class) auth window.
+
+    Transitions the session phase check_in → check_out and resets the active
+    window to a fresh length (body.window_seconds, or the default auth window).
+    Students then verify again against this end-of-class window.
+    """
+    session = await _load_owned_session(db, id, prof.id)
+    if session.phase == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="session is closed"
+        )
+    if session.phase == "check_out":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="checkout window already open",
+        )
+    window = (
+        body.window_seconds if body and body.window_seconds
+        else get_settings().auth_window_seconds
+    )
+    now = _now()
+    session.phase = "check_out"
+    session.window_opened_at = now
+    session.window_expires_at = now + timedelta(seconds=window)
     await db.commit()
     await db.refresh(session)
     return _to_out(session)
@@ -134,7 +176,7 @@ async def close_session(
     db: AsyncSession = Depends(get_db),
 ) -> SessionOut:
     session = await _load_owned_session(db, id, prof.id)
-    session.status = "closed"
+    session.phase = "closed"
     await db.commit()
     await db.refresh(session)
     return _to_out(session)
@@ -278,7 +320,7 @@ class _ClosedSessionView:
         return self._real.course_id
 
     @property
-    def status(self) -> str:
+    def phase(self) -> str:
         return "closed"
 
     @property
