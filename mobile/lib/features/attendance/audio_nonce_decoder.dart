@@ -38,8 +38,8 @@ import 'package:fftea/fftea.dart';
 class AudioNonceDecoder {
   AudioNonceDecoder({
     this.sampleRate = 48000,
-    this.bandLowHz = 18000,
-    this.bandHighHz = 19500,
+    this.bandLowHz = 18500,
+    this.bandHighHz = 20000,
     this.toneSlots = 16,
     this.symbolMs = 60,
     this.detectionThreshold = 4.0,

@@ -8,12 +8,56 @@ from app.config import get_settings
 from app.models import Attendance, Enrollment, Session, User
 from app.schemas import AttendanceAggregate, RiskLevel, RiskWarning, UnverifiedStudent
 
+# Final (resolved) attendance statuses — anything not in this set is `pending`
+# and must be derived from the check_in/check_out timestamps.
+_RESOLVED = {"present", "absent", "late", "early_leave"}
+
+
+def _derive_closed(status, check_in_at, check_out_at) -> str:
+    """Derive the final status at close time from the two timestamps.
+
+    Used when phase=closed (or whenever a row is still pending after close):
+      both passed   -> present
+      check_in only -> early_leave (조퇴)
+      check_out only-> late (지각)
+      neither       -> absent
+    A row whose status was already resolved (professor correction / explicit
+    delta) is kept as-is.
+    """
+    if status in _RESOLVED:
+        return status
+    if check_in_at and check_out_at:
+        return "present"
+    if check_in_at and not check_out_at:
+        return "early_leave"
+    if check_out_at and not check_in_at:
+        return "late"
+    return "absent"
+
+
+def _derive_live(status, check_in_at, check_out_at, phase) -> str:
+    """Derive the display status while the session is still open.
+
+    A resolved status is shown as-is. A pending row counts as `present` if the
+    student has passed the CURRENTLY active phase (check_in stamp during
+    check_in, check_out stamp during check_out); otherwise it is unverified.
+    Late/early_leave are NOT shown until close — during check_out, a student who
+    only passed check_in is simply still unverified for the active window.
+    """
+    if status in _RESOLVED:
+        return status
+    if phase == "check_in":
+        return "present" if check_in_at else "unverified"
+    # check_out phase
+    return "present" if check_out_at else "unverified"
+
 
 async def build_aggregate(db: AsyncSession, session_id: str) -> AttendanceAggregate:
     session = (
         await db.execute(select(Session).where(Session.id == session_id))
     ).scalar_one_or_none()
     course_id = session.course_id if session else None
+    phase = session.phase if session else "closed"
 
     enrolled = (
         await db.execute(
@@ -21,36 +65,47 @@ async def build_aggregate(db: AsyncSession, session_id: str) -> AttendanceAggreg
         )
     ).scalars().all() if course_id else []
 
-    # Present students (verified through the real path).
-    present_rows = (
+    records = (
         await db.execute(
-            select(Attendance.student_id).where(
-                Attendance.session_id == session_id, Attendance.status == "present"
-            )
+            select(Attendance).where(Attendance.session_id == session_id)
         )
     ).scalars().all()
-    present_set = set(present_rows)
+    rec_by_student = {r.student_id: r for r in records}
 
-    # Absent students (resolved by the professor via 출석 마감 / Delta close).
-    # These are no longer "미인증" — the professor has explicitly marked them,
-    # so they leave the unverified list once committed.
-    absent_rows = (
-        await db.execute(
-            select(Attendance.student_id).where(
-                Attendance.session_id == session_id, Attendance.status == "absent"
+    present = late = early_leave = absent = 0
+    unverified_ids: list[str] = []
+    for sid in enrolled:
+        r = rec_by_student.get(sid)
+        if r is None:
+            unverified_ids.append(sid)
+            continue
+        if phase == "closed":
+            derived = _derive_closed(
+                r.status, r.check_in_verified_at, r.check_out_verified_at
             )
-        )
-    ).scalars().all()
-    absent_set = set(absent_rows)
+        else:
+            derived = _derive_live(
+                r.status, r.check_in_verified_at, r.check_out_verified_at, phase
+            )
+        if derived == "present":
+            present += 1
+        elif derived == "late":
+            late += 1
+        elif derived == "early_leave":
+            early_leave += 1
+        elif derived == "absent":
+            absent += 1
+        else:
+            unverified_ids.append(sid)
 
-    resolved = present_set | absent_set
-    total = len(enrolled) if enrolled else len(present_set)
-    unverified_ids = [s for s in enrolled if s not in resolved]
+    total = len(enrolled) if enrolled else (present + late + early_leave + absent)
+    resolved_count = present + late + early_leave + absent
+    if not enrolled:
+        # No enrollments: total falls back to the resolved count.
+        pass
 
     # Join the User rows once so the professor review table can show the school
-    # 학번 (student_number) + name instead of raw UUIDs. Done in a single query
-    # keyed by the unverified ids; missing users (shouldn't happen) fall back to
-    # None display fields.
+    # 학번 (student_number) + name instead of raw UUIDs.
     unverified: list[UnverifiedStudent] = []
     if unverified_ids:
         rows = (
@@ -61,7 +116,6 @@ async def build_aggregate(db: AsyncSession, session_id: str) -> AttendanceAggreg
             )
         ).all()
         by_id = {uid: (snum, name) for uid, snum, name in rows}
-        # Preserve the enrolled order (deterministic) rather than DB row order.
         for sid in unverified_ids:
             snum, name = by_id.get(sid, (None, None))
             unverified.append(
@@ -73,8 +127,10 @@ async def build_aggregate(db: AsyncSession, session_id: str) -> AttendanceAggreg
     return AttendanceAggregate(
         session_id=session_id,
         total=total,
-        present=len(present_set),
-        absent=len(absent_set),
+        present=present,
+        absent=absent,
+        late=late,
+        early_leave=early_leave,
         unverified=unverified,
     )
 

@@ -233,6 +233,20 @@ export function closeSession(sessionId: string): Promise<Session> {
   );
 }
 
+// Open the check_out (end-of-class) auth window: phase check_in → check_out,
+// resets the active window. Optional windowSeconds overrides the default length.
+export function openCheckout(
+  sessionId: string,
+  windowSeconds?: number,
+): Promise<Session> {
+  const body =
+    windowSeconds != null ? { window_seconds: windowSeconds } : {};
+  return request<Session>(
+    `/sessions/${encodeURIComponent(sessionId)}/checkout`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
 export function getSessionToken(sessionId: string): Promise<SessionToken> {
   return request<SessionToken>(
     `/sessions/${encodeURIComponent(sessionId)}/token`,

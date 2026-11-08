@@ -165,7 +165,7 @@ void main() {
       audioNonce: nonce,
       deviceUuid: deviceUuid,
     ));
-    expect(result.status, VerifyStatus.present, reason: 'reason=${result.reason}');
+    expect(result.status, VerifyStatus.verified, reason: 'reason=${result.reason}');
 
     // history reflects the new present record
     final history = await api.getMyAttendance();
@@ -218,7 +218,7 @@ void main() {
     );
 
     final first = await api.verifyAttendance(req);
-    expect(first.status, VerifyStatus.present);
+    expect(first.status, VerifyStatus.verified);
 
     // Same single-use nonce again → server rejects as reused.
     final second = await api.verifyAttendance(req);

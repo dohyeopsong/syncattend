@@ -578,6 +578,36 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Session' }
 
+  /sessions/{id}/checkout:
+    post:
+      tags: [sessions]
+      summary: Open the check_out (end-of-class) auth window
+      description: >
+        Transitions the session phase check_in → check_out and opens a fresh
+        auth window. Students then verify again against this end-of-class
+        window. Professor-only; session must be owned by the caller and still
+        in the check_in phase.
+      operationId: openCheckout
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/SessionId' }]
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OpenCheckoutRequest' }
+      responses:
+        '200':
+          description: Checkout window opened
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Session' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: Session is closed, or checkout window already open
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
   /sessions/{id}/close:
     post:
       tags: [sessions]
@@ -703,9 +733,10 @@ paths:
       tags: [attendance]
       summary: Export a session's full attendance roster as downloadable JSON
       description: >
-        Returns every enrolled student with final status (present/absent/pending),
-        verified_at, and correction info, plus session/course context and date.
-        Suitable for archival / later JSON extraction. Professor-only.
+        Returns every enrolled student with final status (present/absent/late/
+        early_leave/pending), check_in/check_out timestamps, and correction
+        info, plus session/course context and date. Suitable for archival /
+        later JSON extraction. Professor-only.
       operationId: exportSessionAttendance
       security: [{ bearerAuth: [] }]
       parameters: [{ $ref: '#/components/parameters/SessionId' }]
@@ -1076,8 +1107,14 @@ components:
         course_id: { type: string }
         week_number: { type: integer, minimum: 1, maximum: 15, nullable: true, description: academic week (1..15주차) }
         window_open: { type: boolean }
-        window_remaining: { type: integer, description: seconds left in auth window }
-        status: { type: string, enum: [open, closed] }
+        window_remaining: { type: integer, description: seconds left in the currently active auth window }
+        phase:
+          type: string
+          enum: [check_in, check_out, closed]
+          description: >
+            Attendance lifecycle phase. check_in = the start-of-class auth
+            window is open; check_out = the end-of-class auth window is open
+            (professor opened checkout); closed = session finalised.
 
     SessionToken:
       type: object
@@ -1094,6 +1131,20 @@ components:
         expires_in: { type: integer, example: 15 }
         window_open: { type: boolean }
         window_remaining: { type: integer }
+
+    OpenCheckoutRequest:
+      type: object
+      description: >-
+        Body for opening the check_out auth window. window_seconds is optional;
+        omitted, it defaults to the configured auth window length.
+      properties:
+        window_seconds:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          nullable: true
+          default: null
+          description: Length (seconds) of the check_out auth window.
 
     VerifyRequest:
       type: object
@@ -1113,13 +1164,18 @@ components:
     VerifyResult:
       type: object
       properties:
-        status: { type: string, enum: [present, pending, rejected] }
+        status: { type: string, enum: [verified, pending, rejected], description: "verified = the student passed the current phase's auth window; the final attendance status is only resolved at batchClose." }
         cross_verified: { type: boolean }
         device_matched: { type: boolean }
         reason:
           type: string
           enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
+        check_phase:
+          type: string
+          enum: [check_in, check_out]
+          nullable: true
+          description: Which phase this verify counted towards (set on success, null on rejection).
         risk_warning:
           $ref: '#/components/schemas/RiskWarning'
           nullable: true
@@ -1198,7 +1254,11 @@ components:
 
     AttendanceStatus:
       type: string
-      enum: [present, absent, pending]
+      enum: [present, absent, late, early_leave, pending]
+      description: >
+        Final status, resolved at batchClose from the check_in/check_out
+        timestamps: present (both passed), late (check_out only),
+        early_leave (check_in only), absent (neither). `pending` until closed.
 
     AttendanceRecord:
       type: object
@@ -1207,7 +1267,8 @@ components:
         session_id: { type: string }
         student_id: { type: string }
         status: { $ref: '#/components/schemas/AttendanceStatus' }
-        verified_at: { type: string, format: date-time, nullable: true }
+        check_in_verified_at: { type: string, format: date-time, nullable: true, description: When the student passed the start (check_in) auth window. }
+        check_out_verified_at: { type: string, format: date-time, nullable: true, description: When the student passed the end (check_out) auth window. }
 
     MyAttendanceItem:
       type: object
@@ -1219,7 +1280,8 @@ components:
         course_name: { type: string }
         week_number: { type: integer, minimum: 1, maximum: 15, nullable: true, description: academic week (1..15주차) }
         status: { $ref: '#/components/schemas/AttendanceStatus' }
-        verified_at: { type: string, format: date-time, nullable: true }
+        check_in_verified_at: { type: string, format: date-time, nullable: true }
+        check_out_verified_at: { type: string, format: date-time, nullable: true }
         session_opened_at: { type: string, format: date-time, nullable: true }
 
     AttendanceDelta:
@@ -1235,10 +1297,12 @@ components:
         session_id: { type: string }
         total: { type: integer }
         present: { type: integer }
-        absent: { type: integer, description: Students explicitly marked absent (resolved, not 미인증). }
+        absent: { type: integer, description: Students resolved as absent (closed session). }
+        late: { type: integer, description: Students resolved as late (check_out only). Closed session only. }
+        early_leave: { type: integer, description: Students resolved as early_leave (check_in only). Closed session only. }
         unverified:
           type: array
-          description: Students with no present/absent record yet, with readable display fields.
+          description: Students with no resolved status yet (still pending / no record), with readable display fields.
           items: { $ref: '#/components/schemas/UnverifiedStudent' }
 
     UnverifiedStudent:

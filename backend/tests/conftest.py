@@ -97,7 +97,7 @@ async def seed_open_session(session, course_id, window_seconds=60):
     now = _now()
     s = Session(
         course_id=course_id,
-        status="open",
+        phase="check_in",
         window_opened_at=now,
         window_expires_at=now + timedelta(seconds=window_seconds),
     )

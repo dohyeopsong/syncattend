@@ -108,8 +108,11 @@ async def test_my_attendance_lists_own_present_record(client, session):
     assert item["session_id"] == ctx["session"].id
     assert item["course_id"] == ctx["course"].id
     assert item["course_name"] == "Signals 101"
-    assert item["status"] == "present"
-    assert item["verified_at"] is not None
+    # session still open (check_in only) → status not resolved yet (pending),
+    # but the check_in timestamp is recorded.
+    assert item["status"] == "pending"
+    assert item["check_in_verified_at"] is not None
+    assert item["check_out_verified_at"] is None
 
 
 async def test_my_attendance_requires_auth(client, session):

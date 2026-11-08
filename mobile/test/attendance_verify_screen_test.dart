@@ -34,7 +34,7 @@ Widget _app() => const ProviderScope(
 VerifyResult _result(VerifyStatus status, [VerifyReason reason = VerifyReason.none]) =>
     VerifyResult(
       status: status,
-      crossVerified: status == VerifyStatus.present,
+      crossVerified: status == VerifyStatus.verified,
       deviceMatched: true,
       reason: reason,
     );
@@ -107,7 +107,7 @@ void main() {
       expect(
         shouldShowRetry(AttendanceState(
           phase: VerifyPhase.done,
-          result: _result(VerifyStatus.present),
+          result: _result(VerifyStatus.verified),
         )),
         isFalse,
       );

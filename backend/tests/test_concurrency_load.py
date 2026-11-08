@@ -112,7 +112,7 @@ async def test_300_distinct_students_verify_concurrently(client, session):
     ok = sum(1 for r in responses if r.status_code == 200)
     present = sum(
         1 for r in responses
-        if r.status_code == 200 and r.json().get("status") == "present"
+        if r.status_code == 200 and r.json().get("status") == "verified"
     )
     assert ok == N, f"expected {N} OK, got {ok}"
     assert present == N, f"expected {N} present, got {present}"
@@ -149,7 +149,7 @@ async def test_single_student_concurrent_duplicates_only_one_wins(client, sessio
 
     present = [
         r for r in responses
-        if r.status_code == 200 and r.json().get("status") == "present"
+        if r.status_code == 200 and r.json().get("status") == "verified"
     ]
     rejected = [r for r in responses if r.status_code == 409]
 
@@ -209,7 +209,7 @@ async def test_many_students_same_token_concurrently(client, session):
     ok = sum(1 for r in responses if r.status_code == 200)
     present = sum(
         1 for r in responses
-        if r.status_code == 200 and r.json().get("status") == "present"
+        if r.status_code == 200 and r.json().get("status") == "verified"
     )
     assert ok == N, f"expected {N} OK with shared token, got {ok}"
     assert present == N, f"expected {N} present, got {present}"

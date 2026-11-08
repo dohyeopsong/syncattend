@@ -34,7 +34,7 @@ export function SimulationPanel() {
   const course = courses.find((c) => c.id === courseId) ?? null;
   const sessionForThisCourse =
     session && session.course_id === courseId ? session : null;
-  const active = sessionForThisCourse?.status === "open";
+  const active = sessionForThisCourse?.phase !== "closed";
 
   const [count, setCount] = useState(20);
   const [ratio, setRatio] = useState(0.7);

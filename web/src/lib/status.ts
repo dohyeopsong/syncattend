@@ -1,4 +1,4 @@
-import { CheckCircle2, Clock, XCircle } from "lucide-react";
+import { CheckCircle2, Clock, LogOut, Timer, XCircle } from "lucide-react";
 import type { AttendanceAggregate, AttendanceStatus } from "@/api/types";
 
 // Single source of truth for attendance status presentation (design guide §2).
@@ -14,6 +14,8 @@ export interface StatusMeta {
 
 export const STATUS_META: Record<StatusKey, StatusMeta> = {
   present: { label: "출석", badgeVariant: "success", Icon: CheckCircle2 },
+  late: { label: "지각", badgeVariant: "warning", Icon: Timer },
+  early_leave: { label: "조퇴", badgeVariant: "warning", Icon: LogOut },
   pending: { label: "대기", badgeVariant: "warning", Icon: Clock },
   absent: { label: "결석", badgeVariant: "destructive", Icon: XCircle },
 };
@@ -28,32 +30,32 @@ export function statusMeta(key: StatusKey): StatusMeta {
 // instead of recomputing, so the numbers can never drift between panels.
 //
 // Inputs:
-//   aggregate     — server counts (total / present / unverified[]), or null.
+//   aggregate     — server counts (total / present / late / early_leave /
+//                   unverified[]), or null.
 //   pendingDeltas — professor's queued corrections (studentId -> status),
 //                   applied on batch close; used only for the "queued" tallies.
 export interface AttendanceStats {
   total: number;
-  // Server-side present (verified through the real path).
+  // Server-side resolved counts (present / absent / late / early_leave).
   present: number;
+  absent: number;
+  late: number;
+  earlyLeave: number;
   unverified: number;
   // Corrections queued in the opt-out review (not yet committed).
   pendingCorrections: number;
-  absentCorrections: number;
   // LIVE figures: reflect the professor's queued corrections on the unverified
-  // list in real time. 미인증 중 [출석] 표시 → presentFinal, [결석] 표시 →
-  // absentFinal, 미표시 → unverifiedFinal. These drive the review summary tiles
-  // so clicking [출석]/[결석] moves the student between tiles immediately.
+  // list in real time. 미인증 중 [출석] 표시 → presentFinal, etc.
   presentFinal: number;
   absentFinal: number;
+  lateFinal: number;
+  earlyLeaveFinal: number;
   unverifiedFinal: number;
-  // present / total, 0..1 (0 when total is 0).
-  presentShare: number;
-  // unverified / total, 0..1 (0 when total is 0).
-  unverifiedShare: number;
   // Whole-number percentages (rounded) for display.
   presentRate: number;
-  unverifiedRate: number;
   absentFinalRate: number;
+  lateFinalRate: number;
+  earlyLeaveFinalRate: number;
   unverifiedFinalRate: number;
 }
 
@@ -64,47 +66,55 @@ export function deriveAttendanceStats(
   const total = aggregate?.total ?? 0;
   const present = aggregate?.present ?? 0;
   const serverAbsent = aggregate?.absent ?? 0;
+  const serverLate = aggregate?.late ?? 0;
+  const serverEarlyLeave = aggregate?.early_leave ?? 0;
   const unverifiedList = aggregate?.unverified ?? [];
 
-  // Among the unverified list, count how many the professor has queued as
-  // present vs absent (these move out of 미인증 into the live tiles).
-  // unverified entries are objects {student_id, student_number, name}; the
-  // Delta/batch key is the internal student_id (UUID).
+  // Among the unverified list, count how many the professor has queued as each
+  // status (these move out of 미인증 into the live tiles).
   let deltaPresent = 0;
   let deltaAbsent = 0;
+  let deltaLate = 0;
+  let deltaEarlyLeave = 0;
   for (const u of unverifiedList) {
     const sid = typeof u === "string" ? u : u.student_id;
     const s = pendingDeltas[sid];
     if (s === "present") deltaPresent += 1;
     else if (s === "absent") deltaAbsent += 1;
+    else if (s === "late") deltaLate += 1;
+    else if (s === "early_leave") deltaEarlyLeave += 1;
   }
 
   const deltaValues = Object.values(pendingDeltas);
   const pendingCorrections = deltaValues.filter((s) => s === "pending").length;
-  const absentCorrections = deltaValues.filter((s) => s === "absent").length;
 
   const presentFinal = present + deltaPresent;
   const absentFinal = serverAbsent + deltaAbsent;
-  const unverifiedFinal = unverifiedList.length - deltaPresent - deltaAbsent;
+  const lateFinal = serverLate + deltaLate;
+  const earlyLeaveFinal = serverEarlyLeave + deltaEarlyLeave;
+  const unverifiedFinal =
+    unverifiedList.length -
+    deltaPresent - deltaAbsent - deltaLate - deltaEarlyLeave;
 
-  const presentShare = total > 0 ? presentFinal / total : 0;
-  const unverifiedShare = total > 0 ? unverifiedFinal / total : 0;
-  const absentShare = total > 0 ? absentFinal / total : 0;
+  const pct = (n: number) => (total > 0 ? Math.round((n / total) * 100) : 0);
 
   return {
     total,
     present,
+    absent: serverAbsent,
+    late: serverLate,
+    earlyLeave: serverEarlyLeave,
     unverified: unverifiedList.length,
     pendingCorrections,
-    absentCorrections,
     presentFinal,
     absentFinal,
+    lateFinal,
+    earlyLeaveFinal,
     unverifiedFinal,
-    presentShare,
-    unverifiedShare,
-    presentRate: Math.round(presentShare * 100),
-    unverifiedRate: Math.round(unverifiedShare * 100),
-    absentFinalRate: Math.round(absentShare * 100),
-    unverifiedFinalRate: Math.round(unverifiedShare * 100),
+    presentRate: pct(presentFinal),
+    absentFinalRate: pct(absentFinal),
+    lateFinalRate: pct(lateFinal),
+    earlyLeaveFinalRate: pct(earlyLeaveFinal),
+    unverifiedFinalRate: pct(unverifiedFinal),
   };
 }

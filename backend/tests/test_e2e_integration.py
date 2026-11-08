@@ -146,7 +146,8 @@ async def test_e2e_happy_path(client, session, prof_email, student_emails):
     )
     assert verify.status_code == 200, verify.text
     vbody = verify.json()
-    assert vbody["status"] == "present"
+    assert vbody["status"] == "verified"
+    assert vbody["check_phase"] == "check_in"
     assert vbody["cross_verified"] is True and vbody["device_matched"] is True
 
     # professor live aggregate reflects the present student
@@ -155,11 +156,39 @@ async def test_e2e_happy_path(client, session, prof_email, student_emails):
     assert agg["total"] == 2  # two enrolled
     assert any(u["student_id"] == ctx["students"][1]["id"] for u in agg["unverified"])
 
-    # student sees their own history via getMyAttendance
+    # student sees their own history via getMyAttendance. The session is still
+    # open (check_in only), so the final status is not resolved yet → pending.
     hist = (await client.get("/me/attendance", headers=student["hdr"])).json()
     assert len(hist) == 1
     assert hist[0]["session_id"] == sid
-    assert hist[0]["status"] == "present"
+    assert hist[0]["status"] == "pending"
+
+    # professor opens the check_out (end-of-class) auth window
+    co = await client.post(
+        f"/sessions/{sid}/checkout", json={"window_seconds": 120}, headers=p_hdr
+    )
+    assert co.status_code == 200, co.text
+    assert co.json()["phase"] == "check_out"
+
+    # student cross-verifies again against the check_out window
+    tok2 = await _token(client, p_hdr, sid)
+    verify2 = await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": sid,
+            "qr_token": tok2["qr_token"],
+            "audio_nonce": tok2["audio_nonce"],
+            "device_uuid": dev,
+        },
+        headers=student["hdr"],
+    )
+    assert verify2.status_code == 200, verify2.text
+    assert verify2.json()["status"] == "verified"
+    assert verify2.json()["check_phase"] == "check_out"
+
+    # live aggregate still shows 1 present (check_out passed for this student)
+    agg2 = (await client.get(f"/sessions/{sid}/attendance", headers=p_hdr)).json()
+    assert agg2["present"] == 1
 
     # professor manually corrects the absent second student to present,
     # by locating/creating their record via a delta batch first
@@ -170,7 +199,9 @@ async def test_e2e_happy_path(client, session, prof_email, student_emails):
         headers=p_hdr,
     )
     assert batch.status_code == 200, batch.text
-    assert batch.json()["present"] == 1  # unchanged; absent recorded
+    # student 1 passed both phases → present; absent student → absent
+    assert batch.json()["present"] == 1
+    assert batch.json()["absent"] == 1
 
     # fetch the absent record id to correct it (present)
     # re-open + verify is the normal path, but professor-in-the-loop can PATCH:
@@ -197,6 +228,10 @@ async def test_e2e_happy_path(client, session, prof_email, student_emails):
     )
     assert final.status_code == 200, final.text
     assert final.json()["present"] == 2
+
+    # after close, the student's own history shows the resolved present status
+    hist2 = (await client.get("/me/attendance", headers=student["hdr"])).json()
+    assert hist2[0]["status"] == "present"
 
 
 async def test_e2e_correct_attendance_record(client, session, prof_email, student_emails):

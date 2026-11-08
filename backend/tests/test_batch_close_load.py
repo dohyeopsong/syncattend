@@ -33,6 +33,11 @@ def count_dml(engine):
 
     def _on_exec(conn, cursor, statement, params, context, executemany):
         head = statement.lstrip().split(" ", 1)[0].upper()
+        # Only count writes against the attendance table — batchClose also
+        # UPDATEs the session row (phase → closed), which is not an attendance
+        # delta and must not pollute the insert/update tallies.
+        if "attendance" not in statement.lower():
+            return
         if head == "INSERT":
             counts["insert"] += 1
         elif head == "UPDATE":

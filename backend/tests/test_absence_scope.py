@@ -17,7 +17,7 @@ async def _closed_session(session, course_id, week):
     s = Session(
         course_id=course_id,
         week_number=week,
-        status="closed",
+        phase="closed",
         window_opened_at=now,
         window_expires_at=now + timedelta(seconds=60),
     )
@@ -75,7 +75,8 @@ async def test_absence_count_ignores_present_and_pending(session):
             student_id=student.id,
             device_uuid="dev-present",
             status="present",
-            verified_at=_now(),
+            check_in_verified_at=_now(),
+            check_out_verified_at=_now(),
         )
     )
     await session.commit()

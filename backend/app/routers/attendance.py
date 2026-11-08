@@ -110,7 +110,8 @@ async def get_my_attendance(
             course_name=course.name,
             week_number=sess.week_number,
             status=AttendanceStatus(att.status),
-            verified_at=att.verified_at,
+            check_in_verified_at=att.check_in_verified_at,
+            check_out_verified_at=att.check_out_verified_at,
             session_opened_at=sess.window_opened_at,
         )
         for att, sess, course in rows
@@ -176,7 +177,14 @@ async def export_session_attendance(
             "student_id": school_student_id or sid,
             "name": name,
             "status": r.status if r else "pending",
-            "verified_at": r.verified_at.isoformat() if r and r.verified_at else None,
+            "check_in_verified_at": (
+                r.check_in_verified_at.isoformat()
+                if r and r.check_in_verified_at else None
+            ),
+            "check_out_verified_at": (
+                r.check_out_verified_at.isoformat()
+                if r and r.check_out_verified_at else None
+            ),
             "corrected_by": r.corrected_by if r else None,
         })
 
@@ -194,6 +202,8 @@ async def export_session_attendance(
         "total": len(rows),
         "present": sum(1 for r in rows if r["status"] == "present"),
         "absent": sum(1 for r in rows if r["status"] == "absent"),
+        "late": sum(1 for r in rows if r["status"] == "late"),
+        "early_leave": sum(1 for r in rows if r["status"] == "early_leave"),
         "pending": sum(1 for r in rows if r["status"] == "pending"),
         "students": rows,
     }
@@ -219,10 +229,14 @@ async def batch_close_attendance(
     prof: CurrentUser = Depends(require_professor),
     db: AsyncSession = Depends(get_db),
 ) -> AttendanceAggregate:
-    """Delta close: apply explicit corrections, then auto-fail every enrolled
-    student who still has no verdict (pending) to absent. After a close, the
-    session has zero pending records — unverified == absent by policy."""
+    """Delta close: apply explicit corrections, then derive the final status of
+    every enrolled student from their check_in/check_out timestamps. After a
+    close, the session has zero pending records — every student is resolved to
+    present / late / early_leave / absent."""
     session = await _load_owned_session(db, id, prof.id)
+    # A close finalises the session: ensure phase=closed so the live aggregate
+    # switches to showing resolved statuses.
+    session.phase = "closed"
     # 1. Apply explicit deltas (professor-in-the-loop corrections).
     for delta in body.deltas:
         existing = (
@@ -246,9 +260,10 @@ async def batch_close_attendance(
         elif existing.status != delta.status.value:
             existing.status = delta.status.value
             existing.corrected_by = prof.id
-    # 2. Auto-fail: every enrolled student without a present/absent record
-    #    becomes absent. This is the "no pending after close" policy — 미인증
-    #    학생은 마감 시 모두 결석 처리된다.
+    # 2. Auto-derive: every enrolled student whose status is still pending gets
+    #    a final status from the two timestamps. No record at all → absent.
+    #    This is the "no pending after close" policy — 미인증/대기 학생은 마감
+    #    시 타임스탬프 기준으로 확정된다.
     enrolled = (
         (
             await db.execute(
@@ -284,7 +299,14 @@ async def batch_close_attendance(
                 )
             )
         elif r.status == "pending":
-            r.status = "absent"
+            if r.check_in_verified_at and r.check_out_verified_at:
+                r.status = "present"
+            elif r.check_in_verified_at and not r.check_out_verified_at:
+                r.status = "early_leave"
+            elif r.check_out_verified_at and not r.check_in_verified_at:
+                r.status = "late"
+            else:
+                r.status = "absent"
             r.corrected_by = prof.id
     await db.commit()
     return await build_aggregate(db, id)
@@ -316,5 +338,6 @@ async def correct_attendance(
         session_id=record.session_id,
         student_id=record.student_id,
         status=AttendanceStatus(record.status),
-        verified_at=record.verified_at,
+        check_in_verified_at=record.check_in_verified_at,
+        check_out_verified_at=record.check_out_verified_at,
     )

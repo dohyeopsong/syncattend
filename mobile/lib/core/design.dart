@@ -77,6 +77,8 @@ Color attendanceStatusColor(AttendanceStatus s) {
   switch (s) {
     case AttendanceStatus.present:
       return AppColors.success;
+    case AttendanceStatus.late:
+    case AttendanceStatus.earlyLeave:
     case AttendanceStatus.pending:
       return AppColors.warning;
     case AttendanceStatus.absent:
@@ -90,6 +92,10 @@ String attendanceStatusLabel(AttendanceStatus s) {
   switch (s) {
     case AttendanceStatus.present:
       return '출석';
+    case AttendanceStatus.late:
+      return '지각';
+    case AttendanceStatus.earlyLeave:
+      return '조퇴';
     case AttendanceStatus.pending:
       return '대기';
     case AttendanceStatus.absent:
@@ -103,6 +109,10 @@ IconData attendanceStatusIcon(AttendanceStatus s) {
   switch (s) {
     case AttendanceStatus.present:
       return Icons.check_circle;
+    case AttendanceStatus.late:
+      return Icons.timer;
+    case AttendanceStatus.earlyLeave:
+      return Icons.logout;
     case AttendanceStatus.pending:
       return Icons.schedule;
     case AttendanceStatus.absent:

@@ -20,6 +20,11 @@ class MockApiClient implements ApiClient {
   String? _boundUuid;
   final Set<String> _consumedNonces = {};
 
+  /// Sessions that have already completed the check-in phase. The first verify
+  /// for a session resolves to check_in, the next to check_out — mirroring the
+  /// backend's phase-derived VerifyResult.check_phase.
+  final Set<String> _checkInDoneSessions = {};
+
   @override
   Future<TokenPair> login(
       {required String email, required String password}) async {
@@ -58,7 +63,7 @@ class MockApiClient implements ApiClient {
   Future<VerifyCodeResult> sendSignupCode(String email) async {
     await _latency();
     if (!email.endsWith(AppConfig.schoolEmailDomain)) {
-      throw ApiError(
+      throw const ApiError(
         detail: '${AppConfig.schoolEmailDomain} 도메인의 학교 이메일만 사용 가능합니다.',
         statusCode: 400,
       );
@@ -237,12 +242,19 @@ class MockApiClient implements ApiClient {
       );
     }
     _consumedNonces.add(nonceKey);
-    return const VerifyResult(
-      status: VerifyStatus.present,
+    // Dual-auth: first verify for a session completes check_in, the next
+    // completes check_out (mirrors the backend's session.phase derivation).
+    final phase = _checkInDoneSessions.contains(request.sessionId)
+        ? CheckPhase.checkOut
+        : CheckPhase.checkIn;
+    _checkInDoneSessions.add(request.sessionId);
+    return VerifyResult(
+      status: VerifyStatus.verified,
       crossVerified: true,
       deviceMatched: true,
       reason: VerifyReason.none,
-      riskWarning: RiskWarning(
+      checkPhase: phase,
+      riskWarning: const RiskWarning(
         level: RiskLevel.info,
         absences: 0,
         message: 'Attendance recorded (mock).',
@@ -262,7 +274,8 @@ class MockApiClient implements ApiClient {
         courseName: '컴퓨터개론',
         weekNumber: 1,
         status: AttendanceStatus.present,
-        verifiedAt: now.subtract(const Duration(days: 1)),
+        checkInVerifiedAt: now.subtract(const Duration(days: 1)),
+        checkOutVerifiedAt: now.subtract(const Duration(days: 1, minutes: 1)),
         sessionOpenedAt: now.subtract(const Duration(days: 1, minutes: 2)),
       ),
       MyAttendanceItem(
@@ -318,8 +331,11 @@ class MockApiClient implements ApiClient {
           courseName: 'C언어프로그래밍',
           weekNumber: w,
           status: status,
-          verifiedAt: status == AttendanceStatus.present
+          checkInVerifiedAt: status == AttendanceStatus.present
               ? now.subtract(Duration(days: daysAgo))
+              : null,
+          checkOutVerifiedAt: status == AttendanceStatus.present
+              ? now.subtract(Duration(days: daysAgo, minutes: 1))
               : null,
           sessionOpenedAt: now.subtract(Duration(days: daysAgo, minutes: 2)),
         ),

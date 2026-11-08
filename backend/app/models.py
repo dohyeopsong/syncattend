@@ -168,7 +168,13 @@ class Session(Base):
     schedule_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("course_schedules.id", ondelete="SET NULL")
     )
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="open")
+    # Attendance lifecycle phase. A session moves check_in → check_out → closed.
+    # check_in: the "start" auth window is open (professor opened the session).
+    # check_out: the "end" auth window is open (professor opened checkout).
+    # closed: session finalised — attendance states are derived at batchClose.
+    # `window_opened_at` / `window_expires_at` always describe the CURRENTLY
+    # active window; opening checkout resets them to a fresh window.
+    phase: Mapped[str] = mapped_column(String(16), nullable=False, default="check_in")
     window_opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now
     )
@@ -178,7 +184,9 @@ class Session(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (
-        CheckConstraint("status IN ('open', 'closed')", name="ck_sessions_status"),
+        CheckConstraint(
+            "phase IN ('check_in', 'check_out', 'closed')", name="ck_sessions_phase"
+        ),
         CheckConstraint(
             "week_number IS NULL OR (week_number >= 1 AND week_number <= 15)",
             name="ck_sessions_week_number",
@@ -197,8 +205,21 @@ class Attendance(Base):
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     device_uuid: Mapped[str] = mapped_column(String(36), nullable=False)
+    # Status is only finalised at batchClose (phase=closed). Until then it stays
+    # `pending` even after a successful verify — the two timestamps below are the
+    # source of truth, and present/late/early_leave/absent are derived from them.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # When the student passed the START (check_in) / END (check_out) auth window.
+    # Either may be NULL (NULL = that phase was not passed). The combination
+    # derives the final status at close time:
+    #   both   -> present | check_in only -> early_leave
+    #   check_out only -> late | neither -> absent
+    check_in_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    check_out_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     corrected_by: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id")
     )
@@ -207,7 +228,8 @@ class Attendance(Base):
         UniqueConstraint("session_id", "student_id", name="uq_attendance_session_student"),
         UniqueConstraint("session_id", "device_uuid", name="uq_attendance_session_device"),
         CheckConstraint(
-            "status IN ('present', 'absent', 'pending')", name="ck_attendance_status"
+            "status IN ('present', 'absent', 'late', 'early_leave', 'pending')",
+            name="ck_attendance_status",
         ),
     )
 
