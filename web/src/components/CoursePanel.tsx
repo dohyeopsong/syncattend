@@ -720,7 +720,7 @@ export function CoursePanel() {
                             size="icon"
                             variant="ghost"
                             aria-label="강좌 삭제"
-                            className="text-destructive hover:text-destructive"
+                            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                             onClick={() => void onDelete(c)}
                             disabled={busy}
                           >
@@ -789,7 +789,7 @@ export function CoursePanel() {
               if (e.target === e.currentTarget) setShowAdd(false);
             }}
           >
-            <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-card p-4 shadow-soft-lg">
+            <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-white p-4 shadow-soft-lg">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm font-medium">새 강좌 추가</p>
                 <Button

@@ -184,7 +184,7 @@ export function QrSessionModal() {
       aria-modal="true"
       aria-labelledby="qr-session-title"
     >
-      <div className="my-2 w-full max-w-2xl rounded-2xl border border-border/60 bg-card p-4 shadow-soft-lg sm:p-6">
+      <div className="my-2 w-full max-w-2xl rounded-2xl border border-border/60 bg-white p-4 shadow-soft-lg sm:p-6">
         {/* Header */}
         <div className="mb-4 flex items-center justify-between">
           <h2

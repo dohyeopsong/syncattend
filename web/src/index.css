@@ -1,48 +1,107 @@
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* Soft Campus palette — warm tinted ground, softer slate text, rounder
-       surfaces, soft layered shadows. Inspired by campus portal aesthetics:
-       friendly and approachable while staying clean and legible. */
-    --background: 230 25% 97%;          /* #F6F8FC warm light blue-gray ground */
-    --foreground: 215 28% 17%;          /* #1E293B slate-800, softer than gray */
-    --card: 0 0% 100%;                  /* #FFFFFF pure white cards float on ground */
-    --card-foreground: 215 28% 17%;
+    /* Mono — a strict monochrome system. A single near-black primary carries
+       every action; greys handle hierarchy. No hue, no warmth: contrast and
+       spacing do the work. Keeps the UI quiet and legible. */
+    --background: oklch(1 0 0);             /* #FAFAFA zinc-50, off-white ground */
+    --foreground: oklch(0.145 0 0);           /* #18181B zinc-900, near-black text */
+    --card: oklch(1 0 0);                  /* #FFFFFF cards lift off the ground */
+    --card-foreground: oklch(0.145 0 0);
 
-    --primary: 239 84% 67%;             /* #6366F1 indigo-500, softer accent */
-    --primary-foreground: 0 0% 100%;    /* white-on-primary */
+    --primary: oklch(0.205 0 0);              /* #18181B zinc-900, the only "action" color */
+    --primary-foreground: oklch(0.985 0 0);    /* white-on-primary */
 
-    --secondary: 210 40% 96%;           /* #F1F5F9 slate-100 */
-    --secondary-foreground: 215 28% 17%;
-    --muted: 210 40% 96%;               /* #F1F5F9 */
-    --muted-foreground: 215 16% 47%;    /* #64748B slate-500 */
-    --accent: 239 84% 94%;              /* #E8EAFE indigo subtle, slightly more visible */
-    --accent-foreground: 239 84% 67%;
+    --secondary: oklch(0.97 0 0);            /* #F4F4F5 zinc-100 */
+    --secondary-foreground: oklch(0.205 0 0);
+    --muted: oklch(0.97 0 0);                /* #F4F4F5 */
+    --muted-foreground: oklch(0.556 0 0);     /* #71717A zinc-500 */
+    --accent: oklch(0.97 0 0);               /* #F4F4F5, same as secondary — monochrome */
+    --accent-foreground: oklch(0.205 0 0);
 
-    --destructive: 0 84% 60%;           /* #EF4444 danger */
-    --destructive-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;              /* #F59E0B warning */
-    --warning-foreground: 0 0% 100%;
-    --success: 142 71% 45%;             /* #22C55E success */
-    --success-foreground: 0 0% 100%;
+    --destructive: oklch(0.577 0.245 27.325);           /* #DC2626 red-600, the lone chromatic note */
+    --destructive-foreground: oklch(0.985 0 0);          /* white-on-destructive */
+    --warning: oklch(0.769 0.188 70.08);                 /* #F59E0B amber, used sparingly */
+    --warning-foreground: oklch(0.985 0 0);
+    --success: oklch(0.627 0.194 149.214);               /* #22C55E, status only */
+    --success-foreground: oklch(0.985 0 0);
 
-    --border: 214 32% 91%;              /* #E2E8F0 hairline */
-    --input: 214 32% 91%;
-    --ring: 239 84% 67%;                /* focus ring = primary */
-    --radius: 1rem;                     /* 16px — rounder, friendlier */
+    --border: oklch(0.922 0 0);               /* #E4E4E7 zinc-200 hairline */
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);                 /* focus ring = primary */
+    --radius: 0.625rem;                        /* 8px — tighter, more architectural */
+
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
   }
 
   * {
-    border-color: hsl(var(--border));
+    border-color: var(--border);
+    outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
   }
 
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-    font-family: "Pretendard", system-ui, -apple-system, "Segoe UI", sans-serif;
+    @apply bg-background text-foreground;
+    font-family: "Geist Variable", system-ui, -apple-system, "Segoe UI", "Pretendard", sans-serif;
+  }
+  .theme {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+  }
+  .dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+  }
+  html {
+    @apply font-sans;
   }
 }
 
@@ -52,7 +111,7 @@
    motion get a calm static UI (no shimmer, no pulse, no spin). Meaning is never
    carried by motion alone — these are purely decorative/affordance hints. */
 @layer utilities {
-  /* Skeleton placeholder: a soft left-to-right shimmer over a neutral block. */
+  /* Skeleton placeholder: a neutral block with a subtle sweep. */
   .skeleton {
     background-color: hsl(var(--muted));
     border-radius: calc(var(--radius) - 2px);
@@ -63,7 +122,7 @@
       background-image: linear-gradient(
         90deg,
         hsl(var(--muted)) 0%,
-        hsl(210 40% 94%) 50%,
+        hsl(240 6% 93%) 50%,
         hsl(var(--muted)) 100%
       );
       background-size: 200% 100%;

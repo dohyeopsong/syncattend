@@ -102,10 +102,10 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Main column */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Main column — tinted ground (bg-muted) so white cards lift off it. */}
+      <div className="flex min-w-0 flex-1 flex-col bg-muted/50">
         {/* Top bar */}
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-card/80 px-4 py-3 backdrop-blur-md sm:px-6">
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-card px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
             {/* Mobile menu toggle (hidden at md+, where the sidebar is shown) */}
             <Button
