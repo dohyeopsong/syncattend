@@ -44,7 +44,7 @@ export function AttendanceTable() {
 
   if (!session || !aggregate) {
     return (
-      <Card className="bg-white">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <ClipboardCheck className="h-5 w-5" /> 결석자 검토
@@ -145,7 +145,7 @@ export function AttendanceTable() {
   }
 
   return (
-    <Card className="bg-white">
+    <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center gap-2">
@@ -302,7 +302,7 @@ export function AttendanceTable() {
           onClick={() => setConfirmOpen(false)}
         >
           <div
-            className="w-full max-w-sm rounded-2xl border border-border/60 bg-white p-6 shadow-soft-md"
+            className="w-full max-w-sm rounded-2xl border border-border/60 bg-card p-6 shadow-soft-md"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start gap-3">

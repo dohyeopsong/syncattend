@@ -25,6 +25,7 @@ from app.db import get_db
 from app.deps import CurrentUser, get_current_user, require_professor
 from app.models import Course, CourseSchedule, Enrollment, User
 from app.schemas import (
+    AttendanceMatrix,
     BotCleanupResult,
     CourseCatalogItem,
     CourseOut,
@@ -42,6 +43,7 @@ from app.schemas import (
     period_order_ok,
 )
 from app.services.simulation import cleanup_sim, make_sim_student, verify_bot_for_course
+from app.services.aggregate import build_course_matrix
 
 router = APIRouter(prefix="/courses", tags=["courses"])
 # /me/* lives outside the /courses prefix (mirrors attendance's /me/attendance).
@@ -253,6 +255,29 @@ async def list_enrollments(
         )
         for e, u in rows
     ]
+
+
+@router.get(
+    "/{course_id}/attendance/matrix",
+    response_model=AttendanceMatrix,
+    operation_id="getCourseAttendanceMatrix",
+)
+async def get_course_attendance_matrix(
+    course_id: str,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> AttendanceMatrix:
+    """Cumulative per-student x per-week attendance matrix for a course.
+
+    Returns each enrolled student's status across 15 weeks (index 0 = week 1).
+    `null` = no session that week. Closed sessions derive the final status from
+    check_in/check_out timestamps; open sessions show `present` if the student
+    passed the currently-active phase, else `pending`. When a week has multiple
+    sessions, the worst status (absent > pending > late > early_leave > present)
+    is shown. Professor-only; course owned by the caller.
+    """
+    await _load_owned_course(db, course_id, prof.id)
+    return await build_course_matrix(db, course_id)
 
 
 # --------------------------------------------------- professor bot population

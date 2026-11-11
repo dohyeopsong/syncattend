@@ -7,51 +7,63 @@
 
 @layer base {
   :root {
-    /* Mono — a strict monochrome system. A single near-black primary carries
-       every action; greys handle hierarchy. No hue, no warmth: contrast and
-       spacing do the work. Keeps the UI quiet and legible. */
-    --background: oklch(1 0 0);             /* #FAFAFA zinc-50, off-white ground */
-    --foreground: oklch(0.145 0 0);           /* #18181B zinc-900, near-black text */
-    --card: oklch(1 0 0);                  /* #FFFFFF cards lift off the ground */
-    --card-foreground: oklch(0.145 0 0);
+    /* Warm — 60/30/10 rule: terracotta + butter yellow + cream.
+       60% #FFFBEB (cream)         → main: page ground, cards, sidebar — sets the
+         overall calm, warm atmosphere.
+       30% #FEF08A (butter yellow) → sub: secondary/muted/accent surfaces, hover
+         fills, borders — section dividers and card differentiation.
+       10% #C2410C (terracotta)    → point: primary action, links, emphasis, chart
+         main series — the brand identity color that draws the eye.
+       Status colors (destructive/warning/success) stay chromatic for semantics. */
+    /* Clean neutral — white ground, light-grey cards, blue actions.
+       background  → white (page + sidebar + header).
+       card/muted  → light grey; cards lift clearly off the white ground.
+       primary     → blue — the only action/emphasis color (buttons, links,
+         focus rings, chart main series).
+       Status colors (destructive/warning/success) stay chromatic for semantics. */
+    --background: oklch(0.97 0 0);               /* light grey — page ground */
+    --foreground: oklch(0.21 0.02 256);          /* near-black slate text */
+    --card: oklch(1 0 0);                        /* white — card surface */
+    --card-foreground: oklch(0.21 0.02 256);
 
-    --primary: oklch(0.205 0 0);              /* #18181B zinc-900, the only "action" color */
-    --primary-foreground: oklch(0.985 0 0);    /* white-on-primary */
+    --primary: oklch(0.546 0.215 262.88);        /* blue-600 #2563EB */
+    --primary-foreground: oklch(1 0 0);          /* white-on-blue */
 
-    --secondary: oklch(0.97 0 0);            /* #F4F4F5 zinc-100 */
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);                /* #F4F4F5 */
-    --muted-foreground: oklch(0.556 0 0);     /* #71717A zinc-500 */
-    --accent: oklch(0.97 0 0);               /* #F4F4F5, same as secondary — monochrome */
-    --accent-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.96 0 0);                /* light grey — secondary surface */
+    --secondary-foreground: oklch(0.21 0.02 256);
+    --muted: oklch(0.96 0 0);                    /* light grey — muted surface */
+    --muted-foreground: oklch(0.55 0.02 256);    /* mid grey text */
+    --accent: oklch(0.94 0 0);                   /* slightly deeper grey — hover */
+    --accent-foreground: oklch(0.21 0.02 256);
 
-    --destructive: oklch(0.577 0.245 27.325);           /* #DC2626 red-600, the lone chromatic note */
-    --destructive-foreground: oklch(0.985 0 0);          /* white-on-destructive */
-    --warning: oklch(0.769 0.188 70.08);                 /* #F59E0B amber, used sparingly */
+    --destructive: oklch(0.577 0.245 27.325);    /* red-600 — status only */
+    --destructive-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.769 0.188 70.08);         /* amber — status only */
     --warning-foreground: oklch(0.985 0 0);
-    --success: oklch(0.627 0.194 149.214);               /* #22C55E, status only */
+    --success: oklch(0.627 0.194 149.214);       /* green — status only */
     --success-foreground: oklch(0.985 0 0);
 
-    --border: oklch(0.922 0 0);               /* #E4E4E7 zinc-200 hairline */
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);                 /* focus ring = primary */
-    --radius: 0.625rem;                        /* 8px — tighter, more architectural */
+    --border: oklch(0.92 0 0);                   /* light grey hairline */
+    --input: oklch(0.92 0 0);                    /* light grey */
+    --ring: oklch(0.546 0.215 262.88);           /* blue — focus/emphasis */
+    --radius: 0.625rem;                          /* 8px */
 
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --popover: oklch(1 0 0);                     /* white — matches cards */
+    --popover-foreground: oklch(0.21 0.02 256);
+    /* Chart ramp: blue (main) → greys. */
+    --chart-1: oklch(0.546 0.215 262.88);        /* blue — main series */
+    --chart-2: oklch(0.623 0.214 259.815);       /* blue-500 */
+    --chart-3: oklch(0.55 0 0);                  /* mid grey */
+    --chart-4: oklch(0.70 0 0);                  /* light-mid grey */
+    --chart-5: oklch(0.85 0 0);                  /* light grey */
+    --sidebar: oklch(0.97 0 0);                  /* light grey */
+    --sidebar-foreground: oklch(0.21 0.02 256);
+    --sidebar-primary: oklch(0.546 0.215 262.88);/* blue */
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent: oklch(0.96 0 0);           /* light grey — active item */
+    --sidebar-accent-foreground: oklch(0.21 0.02 256);
+    --sidebar-border: oklch(0.92 0 0);           /* light grey */
+    --sidebar-ring: oklch(0.546 0.215 262.88);   /* blue */
   }
 
   * {
@@ -60,7 +72,8 @@
   }
 
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--background);
+    color: var(--foreground);
     font-family: "Geist Variable", system-ui, -apple-system, "Segoe UI", "Pretendard", sans-serif;
   }
   .theme {

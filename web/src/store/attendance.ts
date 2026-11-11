@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   batchCloseAttendance as apiBatch,
   correctAttendance as apiCorrect,
+  getCourseAttendanceMatrix as apiMatrix,
   getSessionAttendance as apiAggregate,
   sseSessionUrl,
 } from "@/api/client";
@@ -10,6 +11,7 @@ import type {
   AttendanceDelta,
   AttendanceStatus,
 } from "@/api/types";
+import { matrixToRows, type StudentRow } from "@/lib/attendanceMatrix";
 
 interface AttendanceState {
   aggregate: AttendanceAggregate | null;
@@ -19,6 +21,15 @@ interface AttendanceState {
   error: string | null;
   eventSource: EventSource | null;
 
+  // Course-wide cumulative attendance matrix (students × 15 weeks) for the
+  // F-grade risk panel + weekly trend chart. Course-scoped: fetchMatrix loads
+  // for one course and is shared by both panels so they stay in sync and only
+  // fetch once per course.
+  matrix: StudentRow[] | null;
+  matrixCourseId: string | null;
+  matrixLoading: boolean;
+  matrixError: string | null;
+
   fetchAggregate: (sessionId: string) => Promise<void>;
   setDelta: (studentId: string, status: AttendanceStatus) => void;
   clearDelta: (studentId: string) => void;
@@ -26,6 +37,7 @@ interface AttendanceState {
   correct: (recordId: string, status: AttendanceStatus) => Promise<boolean>;
   subscribeSse: (sessionId: string) => void;
   unsubscribeSse: () => void;
+  fetchMatrix: (courseId: string, force?: boolean) => Promise<void>;
   reset: () => void;
 }
 
@@ -39,6 +51,10 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
   sseConnected: false,
   error: null,
   eventSource: null,
+  matrix: null,
+  matrixCourseId: null,
+  matrixLoading: false,
+  matrixError: null,
 
   fetchAggregate: async (sessionId) => {
     set({ error: null });
@@ -124,7 +140,37 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
   },
 
   reset: () => {
+    // Reset the CURRENT session's live state (aggregate / SSE / deltas) but
+    // KEEP the course-wide matrix. The matrix is cumulative across the whole
+    // semester and is independent of whichever session is open — clearing it
+    // here made the F-risk panel blank out every time the professor opened a
+    // new session, which looked like the course selection had been lost.
     get().unsubscribeSse();
-    set({ aggregate: null, pendingDeltas: {}, error: null });
+    set({
+      aggregate: null,
+      pendingDeltas: {},
+      error: null,
+    });
+  },
+
+  fetchMatrix: async (courseId, force = false) => {
+    // Skip if already loaded (or loading) for the same course unless forced.
+    // Both RiskGraphPanel and AbsenceRankChart call this on mount; the guard
+    // avoids a duplicate request when both mount together.
+    const st = get();
+    if (!force && st.matrixCourseId === courseId && (st.matrix || st.matrixLoading)) {
+      return;
+    }
+    set({ matrixLoading: true, matrixError: null });
+    try {
+      const resp = await apiMatrix(courseId);
+      set({
+        matrix: matrixToRows(resp),
+        matrixCourseId: courseId,
+        matrixLoading: false,
+      });
+    } catch (e) {
+      set({ matrixLoading: false, matrixError: toMessage(e) });
+    }
   },
 }));

@@ -80,7 +80,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background">
       {/* Sidebar (md and up) */}
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-border/60 bg-card md:flex">
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-background md:flex">
         <div className="flex items-center gap-3 px-5 py-5">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary shadow-soft">
             <ShieldCheck className="h-5 w-5 text-primary-foreground" aria-hidden="true" />
@@ -102,10 +102,10 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {/* Main column — tinted ground (bg-muted) so white cards lift off it. */}
-      <div className="flex min-w-0 flex-1 flex-col bg-muted/50">
+      {/* Main column — cream ground; cards (butter/mustard) lift off it. */}
+      <div className="flex min-w-0 flex-1 flex-col bg-background">
         {/* Top bar */}
-        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border/60 bg-card px-4 py-3 sm:px-6">
+        <header className="sticky top-0 z-10 flex items-center justify-between border-b border-border bg-background px-4 py-3 sm:px-6">
           <div className="flex items-center gap-2">
             {/* Mobile menu toggle (hidden at md+, where the sidebar is shown) */}
             <Button
@@ -148,7 +148,7 @@ export function DashboardLayout({ children }: { children: ReactNode }) {
           <nav
             id="mobile-nav"
             aria-label="주요 메뉴"
-            className="space-y-1.5 border-b border-border/60 bg-card p-3 md:hidden"
+            className="space-y-1.5 border-b border-border bg-background p-3 md:hidden"
           >
             {NAV.map((item) => (
               <NavButton key={item.id} {...item} />

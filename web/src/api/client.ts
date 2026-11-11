@@ -4,6 +4,7 @@
 import type {
   AttendanceAggregate,
   AttendanceDelta,
+  AttendanceMatrix,
   AttendanceRecord,
   AttendanceStatus,
   BotCleanupResult,
@@ -199,6 +200,15 @@ export function enrollStudent(
 export function listEnrollments(courseId: string): Promise<Enrollment[]> {
   return request<Enrollment[]>(
     `/courses/${encodeURIComponent(courseId)}/enrollments`,
+  );
+}
+
+// Cumulative per-student × per-week attendance matrix (15 weeks).
+export function getCourseAttendanceMatrix(
+  courseId: string,
+): Promise<AttendanceMatrix> {
+  return request<AttendanceMatrix>(
+    `/courses/${encodeURIComponent(courseId)}/attendance/matrix`,
   );
 }
 

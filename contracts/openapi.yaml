@@ -473,6 +473,30 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /courses/{course_id}/attendance/matrix:
+    get:
+      tags: [courses]
+      summary: Cumulative per-student × per-week attendance matrix for a course
+      description: >
+        Returns each enrolled student's attendance status across 15 weeks
+        (index 0 = week 1). `null` means no session was held that week. Closed
+        sessions derive the final status from check_in/check_out timestamps;
+        open sessions show `present` if the student passed the currently-active
+        phase, else `pending`. When a week has multiple sessions, the worst
+        status (absent > pending > late > early_leave > present) is shown.
+        Professor-only; course owned by the caller.
+      operationId: getCourseAttendanceMatrix
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '200':
+          description: Attendance matrix
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceMatrix' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /courses/{course_id}/simulate-bots:
     post:
       tags: [courses]
@@ -1317,6 +1341,40 @@ components:
         student_id: { type: string, description: Internal user id (UUID) — the Delta/batch key. }
         student_number: { type: string, nullable: true, description: School 학번. }
         name: { type: string, nullable: true, description: Display name. }
+
+    AttendanceMatrixStudent:
+      type: object
+      description: One enrolled student's per-week attendance status across the semester.
+      properties:
+        student_id: { type: string, description: Internal user id (UUID). }
+        student_number: { type: string, nullable: true, description: School 학번. }
+        name: { type: string, nullable: true, description: Display name. }
+        weeks:
+          type: array
+          description: >
+            Length 15, index 0 = week 1. Each element is an AttendanceStatus or
+            null (null = no session held that week).
+          items: { $ref: '#/components/schemas/AttendanceStatus', nullable: true }
+
+    AttendanceMatrix:
+      type: object
+      description: >
+        Course-wide cumulative attendance matrix: enrolled students x 15 weeks.
+        Closed sessions derive the final status from check_in/check_out
+        timestamps; open sessions show `present` if the student passed the
+        currently-active phase, else `pending`. When a week has multiple
+        sessions, the worst status (absent > pending > late > early_leave >
+        present) is shown.
+      properties:
+        course_id: { type: string }
+        course_name: { type: string, nullable: true }
+        weeks:
+          type: array
+          description: Week numbers (1..15) that have at least one session.
+          items: { type: integer, minimum: 1, maximum: 15 }
+        students:
+          type: array
+          items: { $ref: '#/components/schemas/AttendanceMatrixStudent' }
 
     RiskWarning:
       type: object

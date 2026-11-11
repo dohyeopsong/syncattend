@@ -1,13 +1,10 @@
-import type { AttendanceStatus } from "@/api/types";
+import type { AttendanceMatrix, AttendanceStatus } from "@/api/types";
 
-// Shared dummy attendance matrix for the F-grade risk visualizations.
+// Cumulative attendance matrix helpers for the F-grade risk visualizations.
 //
-// 15주차 × 학생(35명) 더미 출결 데이터. RiskGraphPanel(히트맵)과
-// AbsenceRankChart(결석 랭킹 막대)가 같은 데이터를 공유해 숫자가 일치한다.
-//
-// ⚠️ CLI A가 "강좌별 학생 누적 출결" API를 추가하면 buildMatrix()를 실제
-// 응답을 파싱하는 코드로 교체. 반환형 StudentRow[]만 유지하면 두 컴포넌트
-// 모두 수정 없이 동작한다.
+// The data comes from GET /courses/{id}/attendance/matrix (AttendanceMatrix).
+// RiskGraphPanel (heatmap) and AbsenceRankChart (weekly trend line) share the
+// same StudentRow[] so their numbers always agree.
 
 /** 학생 한 명의 주차별 출결 기록. */
 export interface StudentRow {
@@ -47,52 +44,16 @@ export function lateCount(row: StudentRow): number {
   return row.weeks.filter((w) => w === "late").length;
 }
 
-// 결정적 의사난수 — 새로고침마다 바뀌지 않게.
-function makeRng(seed: number) {
-  let state = seed;
-  return () => {
-    state = (state * 1103515245 + 12345) & 0x7fffffff;
-    return state / 0x7fffffff;
-  };
-}
-
-function pickStatus(rand: () => number): AttendanceStatus {
-  const r = rand();
-  if (r < 0.78) return "present";
-  if (r < 0.86) return "late";
-  if (r < 0.9) return "early_leave";
-  if (r < 0.97) return "absent";
-  return "pending";
-}
-
 /**
- * 더미 출결 매트릭스 생성. 35명 × 15주. 일부 학생은 고의로 결석을 많이
- * 만들어 F 위험 사례를 보여준다.
- * TODO(API): 실제 누적 출결 API 응답으로 교체.
+ * Convert the API matrix response into the StudentRow[] shape the panels
+ * consume. The backend already returns a 15-element `weeks` array per student
+ * (index 0 = week 1, null = no session), so this is a direct mapping.
  */
-export function buildMatrix(): StudentRow[] {
-  const rand = makeRng(42);
-  return Array.from({ length: 35 }, (_, i) => {
-    const highRisk = i === 4 || i === 12 || i === 21 || i === 30;
-    const weeks: (AttendanceStatus | null)[] = Array.from(
-      { length: WEEKS },
-      (_, w) => {
-        if (w > 9 && rand() < 0.3) return null;
-        if (highRisk) {
-          const r = rand();
-          if (r < 0.4) return "absent";
-          if (r < 0.55) return "late";
-          return "present";
-        }
-        return pickStatus(rand);
-      },
-    );
-    const n = i + 1;
-    return {
-      student_id: `s${n}`,
-      student_number: `2024${String(1000 + n).padStart(4, "0")}`,
-      name: `학생${n}`,
-      weeks,
-    };
-  });
+export function matrixToRows(resp: AttendanceMatrix): StudentRow[] {
+  return resp.students.map((s) => ({
+    student_id: s.student_id,
+    student_number: s.student_number,
+    name: s.name,
+    weeks: s.weeks,
+  }));
 }

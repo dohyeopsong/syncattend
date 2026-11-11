@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -6,12 +6,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { TrendingUp } from "lucide-react";
-import {
-  buildMatrix,
-  WEEKS,
-  type StudentRow,
-} from "@/lib/attendanceMatrix";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { TrendingUp, LayoutGrid } from "lucide-react";
+import { WEEKS, type StudentRow } from "@/lib/attendanceMatrix";
+import { useCoursesStore } from "@/store/courses";
+import { useAttendanceStore } from "@/store/attendance";
 import type { AttendanceStatus } from "@/api/types";
 
 // 주차별 출결 추이 선그래프 (15주 × 3 시리즈).
@@ -77,10 +77,21 @@ function yFor(value: number, max: number): number {
 }
 
 export function AbsenceRankChart() {
-  const [matrix] = useState<StudentRow[]>(() => buildMatrix());
+  const courseId = useCoursesStore((s) => s.selectedCourseId);
+  const matrix = useAttendanceStore((s) => s.matrix);
+  const matrixLoading = useAttendanceStore((s) => s.matrixLoading);
+  const matrixError = useAttendanceStore((s) => s.matrixError);
+  const fetchMatrix = useAttendanceStore((s) => s.fetchMatrix);
+
+  // Same shared matrix as RiskGraphPanel — fetch is deduped by the store.
+  useEffect(() => {
+    if (courseId) void fetchMatrix(courseId);
+  }, [courseId, fetchMatrix]);
+
   const [hoverWeek, setHoverWeek] = useState<number | null>(null);
 
-  const counts = buildWeeklyCounts(matrix);
+  const rows = matrix ?? [];
+  const counts = buildWeeklyCounts(rows);
   const max = Math.max(
     1,
     ...SERIES.flatMap((s) => counts[s.key]),
@@ -111,6 +122,30 @@ export function AbsenceRankChart() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {!courseId && (
+          <EmptyState
+            Icon={LayoutGrid}
+            title="강좌를 선택하세요"
+            description="선택한 강좌의 주차별 출결 추이가 표시됩니다."
+          />
+        )}
+        {courseId && matrixLoading && <Skeleton className="h-64 rounded-xl" />}
+        {courseId && !matrixLoading && matrixError && (
+          <EmptyState
+            Icon={TrendingUp}
+            title="불러오지 못했습니다"
+            description={matrixError}
+          />
+        )}
+        {courseId && !matrixLoading && !matrixError && rows.length === 0 && (
+          <EmptyState
+            Icon={LayoutGrid}
+            title="출결 기록이 없습니다"
+            description="이 강좌에 아직 수강생 또는 세션 기록이 없습니다."
+          />
+        )}
+        {courseId && !matrixLoading && !matrixError && rows.length > 0 && (
+          <>
         {/* Legend — 항상 표시 (3 시리즈). 색은 마크만, 텍스트는 토큰. */}
         <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
           {SERIES.map((s) => (
@@ -264,9 +299,10 @@ export function AbsenceRankChart() {
 
         {/* Data source notice */}
         <p className="text-[11px] text-muted-foreground">
-          ※ 현재 샘플 데이터로 표시됩니다. 강좌별 누적 출결 API가 연동되면 실제
-          데이터로 교체됩니다.
+          ※ 선택한 강좌의 누적 출결 데이터입니다.
         </p>
+          </>
+        )}
       </CardContent>
     </Card>
   );

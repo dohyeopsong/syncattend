@@ -435,6 +435,31 @@ class AttendanceAggregate(BaseModel):
     unverified: list[UnverifiedStudent] = Field(default_factory=list)
 
 
+class AttendanceMatrixStudent(BaseModel):
+    """One enrolled student's per-week attendance status across the semester."""
+    student_id: str  # internal user id (UUID)
+    student_number: str | None = None  # school 학번
+    name: str | None = None
+    # Length 15, index 0 = week 1. None = no session held that week.
+    weeks: list[AttendanceStatus | None] = Field(default_factory=list)
+
+
+class AttendanceMatrix(BaseModel):
+    """Course-wide cumulative attendance matrix: enrolled students x 15 weeks.
+
+    Each student's `weeks` is a 15-element list (index 0 = week 1) of statuses.
+    Closed sessions derive the final status from check_in/check_out timestamps;
+    open sessions show `present` if the student passed the currently-active
+    phase, else `pending`. When a week has multiple sessions, the WORST status
+    (absent > pending > late > early_leave > present) is shown.
+    """
+    course_id: str
+    course_name: str | None = None
+    # Week numbers (1..15) that have at least one session.
+    weeks: list[int] = Field(default_factory=list)
+    students: list[AttendanceMatrixStudent] = Field(default_factory=list)
+
+
 # --------------------------------------------------------------- simulation
 # Virtual attendance simulation: the professor opens a session, then runs all
 # verify cases against synthetic students to confirm the 4-step gate works.

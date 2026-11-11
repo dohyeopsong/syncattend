@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -7,11 +7,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckCircle2, XCircle, HelpCircle, Triangle } from "lucide-react";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertTriangle, CheckCircle2, XCircle, HelpCircle, Triangle, LayoutGrid } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { AttendanceStatus } from "@/api/types";
+import { useCoursesStore } from "@/store/courses";
+import { useAttendanceStore } from "@/store/attendance";
 import {
-  buildMatrix,
   riskScore,
   absentCount,
   lateCount,
@@ -59,36 +62,102 @@ const CELL_META: Record<
 };
 
 export function RiskGraphPanel() {
-  const [matrix] = useState<StudentRow[]>(() => buildMatrix());
+  const courseId = useCoursesStore((s) => s.selectedCourseId);
+  const courseName = useCoursesStore(
+    (s) => s.courses.find((c) => c.id === s.selectedCourseId)?.name ?? null,
+  );
+  const matrix = useAttendanceStore((s) => s.matrix);
+  const matrixLoading = useAttendanceStore((s) => s.matrixLoading);
+  const matrixError = useAttendanceStore((s) => s.matrixError);
+  const fetchMatrix = useAttendanceStore((s) => s.fetchMatrix);
+
+  // Load the course-wide matrix whenever the selected course changes. Shared
+  // with AbsenceRankChart via the store, so both panels fetch once per course.
+  useEffect(() => {
+    if (courseId) void fetchMatrix(courseId);
+  }, [courseId, fetchMatrix]);
+
   const [hover, setHover] = useState<{ row: StudentRow; week: number } | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  // 결석 많은 순 정렬(위험 가중 합계 내림차순). 1회차 렌더 후엔 state 고정.
-  const sorted = matrix
+  const rows = matrix ?? [];
+  const riskCount = rows.filter((r) => riskScore(r) >= RISK_THRESHOLD).length;
+  const totalAbsent = rows.reduce((s, r) => s + absentCount(r), 0);
+  const totalLate = rows.reduce((s, r) => s + lateCount(r), 0);
+  const maxAbsent = Math.max(1, ...rows.map(absentCount));
+
+  // 결석 많은 순 정렬(위험 가중 합계 내림차순).
+  const sorted = rows
     .map((r) => ({ r }))
     .sort((a, b) => riskScore(b.r) - riskScore(a.r));
   // 더보기 전에는 학생별 상세(히트맵 표)를 숨긴다 — 요약만 노출.
   // 더보기 누르면 결석 많은 순으로 전체 학생 표가 펼쳐진다.
   const visible = expanded ? sorted : [];
 
-  const rows = matrix;
-  const riskCount = rows.filter((r) => riskScore(r) >= RISK_THRESHOLD).length;
-  const totalAbsent = rows.reduce((s, r) => s + absentCount(r), 0);
-  const totalLate = rows.reduce((s, r) => s + lateCount(r), 0);
-  const maxAbsent = Math.max(1, ...rows.map(absentCount));
-
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5" /> F 학점 위험 학생 출결 매트릭스
-        </CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5" /> F 학점 위험 학생 출결 매트릭스
+          </CardTitle>
+          {courseId && !matrixLoading && !matrixError && rows.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 rounded-md border border-border bg-muted/50 px-2 text-xs text-muted-foreground hover:bg-muted"
+              onClick={() => setExpanded((v) => !v)}
+            >
+              {expanded ? "접기" : "자세히 보기"}
+            </Button>
+          )}
+        </div>
         <CardDescription>
-          15주차 전체 출결을 한눈에. 빨간 칸(결석)이 누적된 학생이 F 위험군이며,
-          위험선(결석 5회 상당)을 넘으면 행에 표시됩니다.
+          {courseName
+            ? `${courseName} — 15주차 전체 출결. 빨간 칸(결석)이 누적된 학생이 F 위험군이며, 위험선(결석 5회 상당)을 넘으면 행에 표시됩니다.`
+            : "15주차 전체 출결을 한눈에. 빨간 칸(결석)이 누적된 학생이 F 위험군이며, 위험선(결석 5회 상당)을 넘으면 행에 표시됩니다."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* No course selected — prompt to pick one. */}
+        {!courseId && (
+          <EmptyState
+            Icon={LayoutGrid}
+            title="강좌를 선택하세요"
+            description="선택한 강좌의 15주 출결 매트릭스가 표시됩니다."
+          />
+        )}
+        {/* Loading */}
+        {courseId && matrixLoading && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-16 rounded-xl" />
+              ))}
+            </div>
+            <Skeleton className="h-40 rounded-xl" />
+          </div>
+        )}
+        {/* Error */}
+        {courseId && !matrixLoading && matrixError && (
+          <EmptyState
+            Icon={AlertTriangle}
+            title="불러오지 못했습니다"
+            description={matrixError}
+            action={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void fetchMatrix(courseId, true)}
+              >
+                다시 시도
+              </Button>
+            }
+          />
+        )}
+        {/* Data */}
+        {courseId && !matrixLoading && !matrixError && rows.length > 0 && (
+          <>
         {/* Legend — 상태별 색 안내 (칸 색 = 신원, 텍스트는 토큰). */}
         <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">
           {(["present", "late", "early_leave", "absent", "pending"] as AttendanceStatus[]).map(
@@ -269,23 +338,20 @@ export function RiskGraphPanel() {
           </>
         )}
 
-        {/* 더보기 / 접기 — 누르기 전엔 요약만, 누르면 학생별 상세 표 펼침. */}
-        <Button
-          variant="outline"
-          size="sm"
-          className="w-full"
-          onClick={() => setExpanded((v) => !v)}
-        >
-          {expanded
-            ? "접기"
-            : `더보기 — 학생별 출결 상세 (${rows.length}명)`}
-        </Button>
-
-        {/* Data source notice */}
         <p className="text-[11px] text-muted-foreground">
-          ※ 현재 샘플 데이터로 표시됩니다. 강좌별 누적 출결 API가 연동되면 실제
-          데이터로 교체됩니다.
+          ※ 선택한 강좌의 누적 출결 데이터입니다. 진행 중인 주차는 확정 전까지
+          대기(pending)로 표시됩니다.
         </p>
+          </>
+        )}
+        {/* Course selected but no data yet (no enrolled students / sessions). */}
+        {courseId && !matrixLoading && !matrixError && rows.length === 0 && (
+          <EmptyState
+            Icon={LayoutGrid}
+            title="출결 기록이 없습니다"
+            description="이 강좌에 아직 수강생 또는 세션 기록이 없습니다."
+          />
+        )}
       </CardContent>
     </Card>
   );

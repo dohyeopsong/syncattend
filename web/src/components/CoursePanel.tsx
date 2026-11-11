@@ -516,9 +516,10 @@ export function CoursePanel() {
     void fetchCourses();
   }, [fetchCourses]);
 
-  useEffect(() => {
-    if (!selected && courses.length > 0) setSelected(courses[0].id);
-  }, [courses, selected]);
+  // Do NOT auto-select the first course on load. The professor must explicitly
+  // pick a course — the F-risk matrix / trend chart only load after a click, so
+  // the dashboard lands on an empty "강좌를 선택하세요" state instead of showing
+  // the first course's data unprompted.
 
   // Keep the shared selectedCourseId in the store in sync so the simulation
   // panel (on a separate nav page) targets the same course the professor picked.
@@ -789,7 +790,7 @@ export function CoursePanel() {
               if (e.target === e.currentTarget) setShowAdd(false);
             }}
           >
-            <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-white p-4 shadow-soft-lg">
+            <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-card p-4 shadow-soft-lg">
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-sm font-medium">새 강좌 추가</p>
                 <Button

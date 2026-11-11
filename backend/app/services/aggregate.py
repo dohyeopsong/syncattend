@@ -5,8 +5,23 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.models import Attendance, Enrollment, Session, User
-from app.schemas import AttendanceAggregate, RiskLevel, RiskWarning, UnverifiedStudent
+from app.models import Attendance, Course, Enrollment, Session, User
+from app.schemas import (
+    AttendanceAggregate,
+    AttendanceMatrix,
+    AttendanceMatrixStudent,
+    AttendanceStatus,
+    RiskLevel,
+    RiskWarning,
+    UnverifiedStudent,
+)
+
+# Semester length — the matrix is always 15 columns (week 1..15).
+_MATRIX_WEEKS = 15
+
+# Severity rank for combining multiple sessions in the same week into one cell.
+# Higher = worse; the worst status wins so the F-risk view stays conservative.
+_SEVERITY = {"present": 0, "early_leave": 1, "late": 2, "pending": 3, "absent": 4}
 
 # Final (resolved) attendance statuses — anything not in this set is `pending`
 # and must be derived from the check_in/check_out timestamps.
@@ -132,6 +147,107 @@ async def build_aggregate(db: AsyncSession, session_id: str) -> AttendanceAggreg
         late=late,
         early_leave=early_leave,
         unverified=unverified,
+    )
+
+
+async def build_course_matrix(db: AsyncSession, course_id: str) -> AttendanceMatrix:
+    """Build the cumulative per-student x per-week attendance matrix for a course.
+
+    For each enrolled student, returns a 15-element `weeks` list (index 0 =
+    week 1). `None` means no session was held that week. Closed sessions derive
+    the final status from the check_in/check_out timestamps (via _derive_closed);
+    open sessions show `present` if the student passed the currently-active
+    phase (via _derive_live, with `unverified` mapped to `pending`). When a week
+    has multiple sessions, the worst status (by _SEVERITY) wins.
+    """
+    course = (
+        await db.execute(select(Course).where(Course.id == course_id))
+    ).scalar_one_or_none()
+    course_name = course.name if course else None
+
+    # Only sessions with a week_number fit the 15-week grid; legacy/null-week
+    # sessions are excluded (they have no column to live in).
+    sessions = (
+        (
+            await db.execute(
+                select(Session)
+                .where(
+                    Session.course_id == course_id,
+                    Session.week_number.isnot(None),
+                )
+                .order_by(Session.week_number)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    sessions_by_week: dict[int, list[Session]] = {}
+    for s in sessions:
+        assert s.week_number is not None  # narrowed by the filter above
+        if 1 <= s.week_number <= _MATRIX_WEEKS:
+            sessions_by_week.setdefault(s.week_number, []).append(s)
+
+    # Enrolled students, joined to User for 학번 + name. Bots appear too.
+    enrolled = (
+        await db.execute(
+            select(Enrollment.student_id, User.student_id, User.name)
+            .join(User, User.id == Enrollment.student_id)
+            .where(Enrollment.course_id == course_id)
+            .order_by(User.student_id)
+        )
+    ).all()
+
+    # All attendance records for the course's sessions, keyed by
+    # (session_id, student_id) for O(1) lookup while building rows.
+    session_ids = [s.id for s in sessions]
+    records: list[Attendance] = []
+    if session_ids:
+        records = (
+            (
+                await db.execute(
+                    select(Attendance).where(Attendance.session_id.in_(session_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    rec_by_key = {(r.session_id, r.student_id): r for r in records}
+
+    students_out: list[AttendanceMatrixStudent] = []
+    for uid, snum, name in enrolled:
+        weeks: list[AttendanceStatus | None] = [None] * _MATRIX_WEEKS
+        for wnum, sess_list in sessions_by_week.items():
+            idx = wnum - 1
+            worst: str | None = None
+            for sess in sess_list:
+                r = rec_by_key.get((sess.id, uid))
+                status = r.status if r else None
+                check_in = r.check_in_verified_at if r else None
+                check_out = r.check_out_verified_at if r else None
+                if sess.phase == "closed":
+                    derived = _derive_closed(status, check_in, check_out)
+                else:
+                    derived = _derive_live(status, check_in, check_out, sess.phase)
+                    # _derive_live returns "unverified" for not-yet-passed
+                    # students; map to the DB status `pending` so the matrix
+                    # only ever emits AttendanceStatus values.
+                    if derived == "unverified":
+                        derived = "pending"
+                if worst is None or _SEVERITY.get(derived, 0) > _SEVERITY.get(worst, 0):
+                    worst = derived
+            weeks[idx] = AttendanceStatus(worst) if worst else None
+        students_out.append(
+            AttendanceMatrixStudent(
+                student_id=uid, student_number=snum, name=name, weeks=weeks
+            )
+        )
+
+    weeks_with_sessions = sorted(sessions_by_week.keys())
+    return AttendanceMatrix(
+        course_id=course_id,
+        course_name=course_name,
+        weeks=weeks_with_sessions,
+        students=students_out,
     )
 
 

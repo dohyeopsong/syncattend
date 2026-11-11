@@ -149,6 +149,23 @@ export interface AttendanceAggregate {
   unverified: UnverifiedStudent[]; // readable student summaries, not raw UUIDs
 }
 
+// One enrolled student's per-week status across the semester (15 weeks).
+export interface AttendanceMatrixStudent {
+  student_id: string; // internal user id (UUID)
+  student_number: string | null; // school 학번
+  name: string | null;
+  // Length 15, index 0 = week 1. null = no session held that week.
+  weeks: (AttendanceStatus | null)[];
+}
+
+// Course-wide cumulative attendance matrix: students x 15 weeks.
+export interface AttendanceMatrix {
+  course_id: string;
+  course_name: string | null;
+  weeks: number[]; // week numbers (1..15) that have at least one session
+  students: AttendanceMatrixStudent[];
+}
+
 export type VerifyReason =
   | "window_closed"
   | "cross_verify_failed"
