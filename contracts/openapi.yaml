@@ -473,6 +473,76 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /courses/{course_id}/schedules:
+    post:
+      tags: [courses]
+      summary: Add one weekly time slot to a course
+      description: >
+        Adds a single weekly time slot (e.g. Mon 1교시, or Wed 1~3교시) to a
+        course. A course meeting multiple times per week has one row per slot.
+        Rejects (409) if a slot with the same day/start_period already exists.
+        Professor-only; course owned by the caller.
+      operationId: addCourseSchedule
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateScheduleRequest' }
+      responses:
+        '201':
+          description: Slot created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleOut' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A slot with this day/start_period already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [courses]
+      summary: List all weekly slots of a course
+      description: >
+        Returns every weekly slot of a course, ordered by day_of_week then
+        start_period. Readable by any authenticated user (timetable rendering).
+      operationId: listCourseSchedules
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '200':
+          description: Ordered list of weekly slots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ScheduleOut' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /courses/{course_id}/schedules/{schedule_id}:
+    delete:
+      tags: [courses]
+      summary: Delete one weekly time slot
+      description: >
+        Deletes a single weekly slot. `sessions.schedule_id` is ON DELETE
+        SET NULL, so existing sessions survive slot deletion. Professor-only;
+        course owned by the caller.
+      operationId: deleteCourseSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CourseId' }
+        - name: schedule_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Slot deleted (no body) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /courses/{course_id}/attendance/matrix:
     get:
       tags: [courses]
@@ -1275,6 +1345,44 @@ components:
         course_id: { type: string }
         removed: { type: integer }
         cleaned_up: { type: boolean }
+
+    CreateScheduleRequest:
+      type: object
+      description: >
+        One weekly time slot for a course (e.g. Mon 1교시, or Wed 1~3교시).
+        day_of_week: 0=Mon..6=Sun. Periods run 1..12 (1교시..12교시).
+        start_period must be <= end_period.
+      required: [day_of_week, start_period, end_period]
+      properties:
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week, 0=Monday .. 6=Sunday.
+        start_period:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: Starting period (1..12).
+        end_period:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: Ending period (1..12); must be >= start_period.
+
+    ScheduleOut:
+      type: object
+      description: A single weekly time slot of a course.
+      properties:
+        id: { type: string, format: uuid }
+        course_id: { type: string, format: uuid }
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week, 0=Monday .. 6=Sunday.
+        start_period: { type: integer, minimum: 1, maximum: 12 }
+        end_period: { type: integer, minimum: 1, maximum: 12 }
 
     AttendanceStatus:
       type: string
