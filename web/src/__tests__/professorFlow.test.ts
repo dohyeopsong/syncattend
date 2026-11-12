@@ -317,7 +317,7 @@ describe("professor happy-path E2E (web client + stores)", () => {
     // 2) open session + poll token (audio nonce present)
     const session = await useSessionStore
       .getState()
-      .openSession("course-1", 60);
+      .openSession("course-1", { windowSeconds: 60 });
     expect(session?.session_id).toBe("sess-1");
     expect(useSessionStore.getState().token?.audio_nonce).toBe("1a2b3c4d");
     expect(useSessionStore.getState().token?.expires_in).toBe(15);

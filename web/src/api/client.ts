@@ -15,7 +15,9 @@ import type {
   LoginRequest,
   RefreshRequest,
   Session,
+  SessionEstimate,
   SessionToken,
+  CourseScheduleSlot,
   SimulateBotsRequest,
   SimulateBotsResult,
   SimulationResult,
@@ -215,12 +217,40 @@ export function getCourseAttendanceMatrix(
 // ------------------------------------------------------------ sessions
 export function createSession(
   courseId: string,
-  windowSeconds = 60,
+  opts?: {
+    windowSeconds?: number;
+    weekNumber?: number | null;
+    scheduleId?: string | null;
+  },
 ): Promise<Session> {
+  const { windowSeconds = 60, weekNumber = null, scheduleId = null } = opts ?? {};
   return request<Session>("/sessions", {
     method: "POST",
-    body: JSON.stringify({ course_id: courseId, window_seconds: windowSeconds }),
+    body: JSON.stringify({
+      course_id: courseId,
+      window_seconds: windowSeconds,
+      week_number: weekNumber,
+      schedule_id: scheduleId,
+    }),
   });
+}
+
+// Pre-fill the open-session modal: estimated week + slot for the current time.
+// Does NOT create a session — the professor confirms/edits then calls createSession.
+export function estimateSession(courseId: string): Promise<SessionEstimate> {
+  return request<SessionEstimate>("/sessions/estimate", {
+    method: "POST",
+    body: JSON.stringify({ course_id: courseId }),
+  });
+}
+
+// All weekly slots of a course (for the open-session confirmation dropdown).
+export function listCourseSchedules(
+  courseId: string,
+): Promise<CourseScheduleSlot[]> {
+  return request<CourseScheduleSlot[]>(
+    `/courses/${encodeURIComponent(courseId)}/schedules`,
+  );
 }
 
 export function extendWindow(

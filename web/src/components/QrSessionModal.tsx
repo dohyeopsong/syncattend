@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { useSessionStore } from "@/store/session";
+import { useCoursesStore } from "@/store/courses";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RealtimeRiskPanel } from "@/components/RealtimeRiskPanel";
@@ -27,6 +28,15 @@ export function QrSessionModal() {
   const startTokenPolling = useSessionStore((s) => s.startTokenPolling);
   const stopTokenPolling = useSessionStore((s) => s.stopTokenPolling);
   const openReview = useSessionStore((s) => s.openReview);
+
+  // Course name for the QR context block — looked up from the courses store so
+  // the student app can render "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)" at
+  // scan time with no extra round-trip. The auth payload (sessionId|qrToken) is
+  // untouched; context is appended after a "||" separator so the student client
+  // splits auth vs. display cleanly.
+  const courseName = useCoursesStore(
+    (s) => s.courses.find((c) => c.id === session?.course_id)?.name ?? "",
+  );
 
   // Active = an auth window is open in either phase (not closed).
   const active = session?.phase === "check_in" || session?.phase === "check_out";
@@ -234,7 +244,17 @@ export function QrSessionModal() {
           {token ? (
             <>
               <QRCodeSVG
-                value={`${session!.session_id}|${token.qr_token}`}
+                value={(() => {
+                  // Auth payload stays exactly sessionId|qrToken (the student
+                  // client reads parts[0]/parts[1] for verify). A "||"-separated
+                  // context block is appended for display only:
+                  //   courseName | scheduleLabel | weekNumber | phaseCode(1|2)
+                  // Empty fields are emitted as "" so positional parsing is safe.
+                  const phaseCode = phase === "check_out" ? "2" : "1";
+                  const week = session?.week_number ?? "";
+                  const label = session?.schedule_label ?? "";
+                  return `${session!.session_id}|${token.qr_token}||${courseName}|${label}|${week}|${phaseCode}`;
+                })()}
                 size={300}
                 includeMargin
               />

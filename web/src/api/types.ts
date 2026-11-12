@@ -34,6 +34,7 @@ export interface Course {
   end_period: number | null;
   location: string | null;
   credits: number | null;
+  semester_start_date: string | null; // ISO date (YYYY-MM-DD); 1주차 월요일
   created_at: string;
 }
 
@@ -48,6 +49,7 @@ export interface CreateCourseRequest {
   end_period?: number | null;
   location?: string | null;
   credits?: number | null;
+  semester_start_date?: string | null;
 }
 
 // PATCH — every field optional (partial update). Mirrors UpdateCourseRequest.
@@ -82,9 +84,28 @@ export interface Enrollment {
 export interface Session {
   session_id: string;
   course_id: string;
+  week_number: number | null; // 1..15
+  schedule_id: string | null; // which weekly slot
+  schedule_label: string | null; // e.g. "월 1교시", "화 2~3교시"
   window_open: boolean;
   window_remaining: number; // seconds left in the currently active auth window
   phase: "check_in" | "check_out" | "closed";
+}
+
+// Estimate (week + slot) for a new session. POST /sessions/estimate.
+export interface SessionEstimate {
+  week_number: number | null;
+  schedule_id: string | null;
+  schedule_label: string | null;
+}
+
+// One weekly time slot of a course. GET /courses/{course_id}/schedules.
+export interface CourseScheduleSlot {
+  id: string;
+  course_id: string;
+  day_of_week: DayOfWeek;
+  start_period: number;
+  end_period: number;
 }
 
 export interface SessionToken {
@@ -168,6 +189,7 @@ export interface AttendanceMatrix {
 
 export type VerifyReason =
   | "window_closed"
+  | "not_enrolled"
   | "cross_verify_failed"
   | "nonce_reused"
   | "device_mismatch"

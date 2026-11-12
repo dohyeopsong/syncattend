@@ -16,7 +16,10 @@ interface SessionState {
   // 결석자 검토 팝업: 세션 닫기 또는 인증 창 만료(0s) 시 자동 오픈.
   reviewOpen: boolean;
 
-  openSession: (courseId: string, windowSeconds?: number) => Promise<Session | null>;
+  openSession: (
+    courseId: string,
+    opts?: { windowSeconds?: number; weekNumber?: number | null; scheduleId?: string | null },
+  ) => Promise<Session | null>;
   extend: (addSeconds?: number) => Promise<void>;
   /** Open the check_out (end-of-class) auth window: check_in → check_out. */
   openCheckout: (windowSeconds?: number) => Promise<void>;
@@ -40,10 +43,15 @@ export const useSessionStore = create<SessionState>((set, get) => ({
   pollTimer: null,
   reviewOpen: false,
 
-  openSession: async (courseId, windowSeconds = 60) => {
+  openSession: async (courseId, opts) => {
+    const { windowSeconds = 60, weekNumber = null, scheduleId = null } = opts ?? {};
     set({ error: null });
     try {
-      const session = await apiCreate(courseId, windowSeconds);
+      const session = await apiCreate(courseId, {
+        windowSeconds,
+        weekNumber,
+        scheduleId,
+      });
       set({ session });
       await get().refreshToken();
       return session;

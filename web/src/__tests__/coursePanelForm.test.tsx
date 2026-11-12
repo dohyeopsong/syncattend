@@ -27,6 +27,7 @@ function makeForm(overrides: Partial<CourseForm> = {}): CourseForm {
     end_period: "",
     location: "",
     credits: "",
+    semester_start_date: "",
     ...overrides,
   };
 }

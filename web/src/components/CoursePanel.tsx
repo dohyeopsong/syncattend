@@ -22,10 +22,12 @@ import {
 import type {
   Course,
   CourseCatalogItem,
+  CourseScheduleSlot,
   CreateCourseRequest,
   DayOfWeek,
   UpdateCourseRequest,
 } from "@/api/types";
+import { estimateSession, listCourseSchedules } from "@/api/client";
 import { BookOpen, Pencil, Play, Plus, Search, Trash2, Users, X } from "lucide-react";
 
 // day_of_week: 0=Mon … 6=Sun (per contract).
@@ -40,6 +42,14 @@ const DAY_LABELS: Record<DayOfWeek, string> = {
 };
 
 const DAY_OPTIONS: DayOfWeek[] = [0, 1, 2, 3, 4, 5, 6];
+
+// Format a CourseScheduleSlot as "월 1교시" / "화 2~3교시" for the dropdown.
+function slotLabel(s: CourseScheduleSlot): string {
+  const day = DAY_LABELS[s.day_of_week];
+  return s.start_period === s.end_period
+    ? `${day} ${s.start_period}교시`
+    : `${day} ${s.start_period}~${s.end_period}교시`;
+}
 
 // Period rule: 1..12교시, each 60 min, 1교시 starts 09:00.
 // N교시 start hour = 8 + N (1교시 → 09:00 … 12교시 → 20:00).
@@ -88,6 +98,7 @@ interface CourseForm {
   end_period: string;
   location: string;
   credits: string;
+  semester_start_date: string; // ISO date (YYYY-MM-DD) or ""
 }
 
 export type { CourseForm };
@@ -102,6 +113,7 @@ const EMPTY_FORM: CourseForm = {
   end_period: "",
   location: "",
   credits: "",
+  semester_start_date: "",
 };
 
 function courseToForm(c: Course): CourseForm {
@@ -115,6 +127,7 @@ function courseToForm(c: Course): CourseForm {
     end_period: c.end_period != null ? String(c.end_period) : "",
     location: c.location ?? "",
     credits: c.credits != null ? String(c.credits) : "",
+    semester_start_date: c.semester_start_date ?? "",
   };
 }
 
@@ -133,6 +146,7 @@ export function formToPayload(f: CourseForm): CreateCourseRequest {
     end_period: num(f.end_period),
     location: str(f.location),
     credits: num(f.credits),
+    semester_start_date: str(f.semester_start_date),
   };
 }
 
@@ -148,6 +162,7 @@ function catalogItemToForm(item: CourseCatalogItem): CourseForm {
     end_period: item.end_period != null ? String(item.end_period) : "",
     location: item.location ?? "",
     credits: item.credits != null ? String(item.credits) : "",
+    semester_start_date: "",
   };
 }
 
@@ -309,6 +324,19 @@ function CourseFields({
           value={form.credits}
           onChange={(e) => upd({ credits: e.target.value })}
         />
+      </div>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-muted-foreground">
+          학기 시작일 (1주차 월요일)
+        </label>
+        <Input
+          type="date"
+          value={form.semester_start_date}
+          onChange={(e) => upd({ semester_start_date: e.target.value })}
+        />
+        <p className="text-[11px] text-muted-foreground">
+          세션 생성 시 주차 자동 추정에 사용됩니다.
+        </p>
       </div>
     </div>
   );
@@ -498,6 +526,15 @@ export function CoursePanel() {
   const [editForm, setEditForm] = useState<CourseForm>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
 
+  // Open-session confirmation: estimate (week + slot) is fetched on "세션 열기"
+  // and the professor confirms/edits before the session is actually created.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [estimating, setEstimating] = useState(false);
+  const [schedules, setSchedules] = useState<CourseScheduleSlot[]>([]);
+  const [chosenWeek, setChosenWeek] = useState<number | null>(null);
+  const [chosenScheduleId, setChosenScheduleId] = useState<string | null>(null);
+  const [estimateLabel, setEstimateLabel] = useState<string | null>(null);
+
   // Whether the add form already matches an existing course (by code, fallback
   // name). Used to disable the submit button and warn on direct manual entry.
   const addDupKey = (addForm.code?.trim() || addForm.name.trim()).toLowerCase();
@@ -599,8 +636,43 @@ export function CoursePanel() {
     // resume() + the silent-prime buffer finish before the network round-trips
     // consume the gesture window.
     await unlockAudio();
+    // Fetch the estimated week + slot and the course's weekly slots, then ask
+    // the professor to confirm before creating the session. Estimation uses the
+    // current KST time + the course's semester_start_date + its schedule rows.
+    setEstimating(true);
+    setConfirmOpen(true);
+    setChosenWeek(null);
+    setChosenScheduleId(null);
+    setEstimateLabel(null);
+    try {
+      const [est, slots] = await Promise.all([
+        estimateSession(selected),
+        listCourseSchedules(selected),
+      ]);
+      setSchedules(slots);
+      setChosenWeek(est.week_number);
+      setChosenScheduleId(est.schedule_id);
+      setEstimateLabel(est.schedule_label);
+    } catch {
+      // Estimation failed (network / no semester_start) — still let the
+      // professor pick manually from the schedules list.
+      setSchedules([]);
+    } finally {
+      setEstimating(false);
+    }
+  }
+
+  async function confirmOpenSession() {
+    if (!selected) return;
+    setBusy(true);
     resetAttendance();
-    await openSession(selected, windowSeconds);
+    await openSession(selected, {
+      windowSeconds,
+      weekNumber: chosenWeek,
+      scheduleId: chosenScheduleId,
+    });
+    setBusy(false);
+    setConfirmOpen(false);
   }
 
   return (
@@ -849,6 +921,95 @@ export function CoursePanel() {
                   </Button>
                 </div>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* ---- open-session confirmation: estimated week + slot ---- */}
+        {confirmOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+            <div className="w-full max-w-md rounded-2xl border border-border bg-card p-5 shadow-soft-lg">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-sm font-semibold">세션 정보 확인</p>
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-7 w-7"
+                  onClick={() => setConfirmOpen(false)}
+                  aria-label="닫기"
+                  disabled={busy}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+              {estimating ? (
+                <p className="text-sm text-muted-foreground">
+                  현재 시각 기준 주차·교시를 추정 중…
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    {selectedCourse ? `“${selectedCourse.name}” ` : ""}세션을
+                    시작합니다. 추정된 주차·교시를 확인 또는 수정 후 확정하세요.
+                  </p>
+                  {estimateLabel && (
+                    <p className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+                      추정: <strong>{estimateLabel}</strong>
+                      {chosenWeek != null ? ` · ${chosenWeek}주차` : ""}
+                    </p>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">주차</span>
+                      <select
+                        className="h-10 w-full rounded-xl border border-input bg-card px-2 text-sm shadow-soft"
+                        value={chosenWeek ?? ""}
+                        onChange={(e) =>
+                          setChosenWeek(
+                            e.target.value === ""
+                              ? null
+                              : Number(e.target.value),
+                          )
+                        }
+                      >
+                        <option value="">미지정</option>
+                        {Array.from({ length: 15 }, (_, i) => i + 1).map((w) => (
+                          <option key={w} value={w}>
+                            {w}주차
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      <span className="font-medium">교시(슬롯)</span>
+                      <select
+                        className="h-10 w-full rounded-xl border border-input bg-card px-2 text-sm shadow-soft"
+                        value={chosenScheduleId ?? ""}
+                        onChange={(e) =>
+                          setChosenScheduleId(
+                            e.target.value === "" ? null : e.target.value,
+                          )
+                        }
+                      >
+                        <option value="">미지정 (ad-hoc)</option>
+                        {schedules.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {slotLabel(s)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => void confirmOpenSession()}
+                    disabled={busy}
+                  >
+                    <Play className="h-4 w-4" /> {busy ? "여는 중…" : "확정하고 세션 열기"}
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         )}
