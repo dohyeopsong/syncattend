@@ -137,4 +137,47 @@ void main() {
       );
     });
   });
+
+  group('sessionContextLine (QR context block → one-line label)', () {
+    test('full context → "course · slot · N주차 · 시작 인증 (1/2)"', () {
+      const s = AttendanceState(
+        courseName: '자료구조',
+        scheduleLabel: '월 1교시',
+        weekNumber: 3,
+        isCheckoutPhase: false,
+      );
+      expect(
+        sessionContextLine(s),
+        '자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)',
+      );
+    });
+
+    test('check_out phase → "종료 인증 (2/2)"', () {
+      const s = AttendanceState(
+        courseName: '자료구조',
+        scheduleLabel: '화 2~3교시',
+        weekNumber: 5,
+        isCheckoutPhase: true,
+      );
+      expect(
+        sessionContextLine(s),
+        '자료구조 · 화 2~3교시 · 5주차 · 종료 인증 (2/2)',
+      );
+    });
+
+    test('null when no context fields are set', () {
+      expect(sessionContextLine(const AttendanceState()), isNull);
+    });
+
+    test('skips empty segments but always shows the phase label', () {
+      // course + phase only (no slot / week) → no leading " · " gaps.
+      const s = AttendanceState(courseName: '운영체제');
+      expect(sessionContextLine(s), '운영체제 · 시작 인증 (1/2)');
+    });
+
+    test('week-only context still renders', () {
+      const s = AttendanceState(weekNumber: 7);
+      expect(sessionContextLine(s), '7주차 · 시작 인증 (1/2)');
+    });
+  });
 }

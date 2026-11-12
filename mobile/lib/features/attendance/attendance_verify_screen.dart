@@ -66,6 +66,26 @@ String verifyReasonGuidance(VerifyReason r) {
   }
 }
 
+/// One-line session context derived from the QR context block, e.g.
+/// "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)". Pure + top-level so the
+/// formatting (segment order, phase label, empty-field skipping) is unit-tested
+/// independently of the widget tree. Returns null when no context is available.
+String? sessionContextLine(AttendanceState s) {
+  if (!s.hasContext) return null;
+  final segments = <String>[];
+  if (s.courseName != null && s.courseName!.isNotEmpty) {
+    segments.add(s.courseName!);
+  }
+  if (s.scheduleLabel != null && s.scheduleLabel!.isNotEmpty) {
+    segments.add(s.scheduleLabel!);
+  }
+  if (s.weekNumber != null) segments.add('${s.weekNumber}주차');
+  // Phase label is always shown when any context exists, so the student always
+  // knows which round (1/2 시작 vs 2/2 종료) they are authenticating against.
+  segments.add(s.isCheckoutPhase ? '종료 인증 (2/2)' : '시작 인증 (1/2)');
+  return segments.join(' · ');
+}
+
 class AttendanceVerifyScreen extends ConsumerStatefulWidget {
   const AttendanceVerifyScreen({super.key});
 
@@ -184,6 +204,15 @@ class _AttendanceVerifyScreenState
           SafeArea(
             child: Column(
               children: [
+                // Session context banner — "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)".
+                // Parsed from the QR context block; display only. Sits at the very
+                // top so the student knows which session/round they are authenticating
+                // against at a glance, over both the camera feed and the result view.
+                if (sessionContextLine(state) != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: _SessionContextBanner(text: sessionContextLine(state)!),
+                  ),
                 // Upper region: left empty while capturing so the QR reticle
                 // window stays fully visible; the result fills it once done.
                 if (state.phase != VerifyPhase.capturing)
@@ -208,6 +237,46 @@ class _AttendanceVerifyScreenState
                     ),
                   ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact one-line banner showing the parsed session context (course · slot ·
+/// week · phase). Semi-transparent so it stays readable over the live camera
+/// feed while capturing. Display only — never affects the verify flow.
+class _SessionContextBanner extends StatelessWidget {
+  const _SessionContextBanner({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xE6FFFFFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.indigo.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.event_available,
+              size: 15, color: AppColors.indigo),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.foreground,
+              ),
             ),
           ),
         ],
