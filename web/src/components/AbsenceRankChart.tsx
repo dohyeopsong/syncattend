@@ -21,8 +21,9 @@ import type { AttendanceStatus } from "@/api/types";
 // 의존성 없이 가볍게 렌더링. 마크 스펙: 2px 선, >=8px 마커, 호버 툴팁,
 // 범례는 항상 표시(3 시리즈).
 //
-// 데이터: lib/attendanceMatrix.ts 의 더미 매트릭스에서 주차별로 집계.
-// TODO(API): 누적 출결 API 연동 시 buildMatrix()만 교체하면 동작.
+// 데이터: lib/attendanceMatrix.ts 의 matrixToRows() 결과를 주차별로 집계.
+// 매트릭스는 GET /courses/{course_id}/attendance/matrix 응답을 파싱한 것으로,
+// RiskGraphPanel과 store를 통해 공유된다.
 
 type SeriesKey = "present" | "late" | "absent";
 

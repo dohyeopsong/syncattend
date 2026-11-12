@@ -29,9 +29,9 @@ import {
 // 칸 색=출결 상태인 히트맵으로 표현. 결석 누적이 위험선을 넘으면 해당
 // 학생 행에 F 위험 표시를 준다.
 //
-// ⚠️ 현재 백엔드에 "강좌별 학생 누적 출결" API가 없어 아래 더미 데이터로
-// 렌더링한다. CLI A가 누적 출결 집계 엔드포인트를 추가하면 `buildMatrix`
-// 를 실제 응답을 파싱하는 코드로 교체하면 된다 (타입은 아래 참조).
+// 데이터: GET /courses/{course_id}/attendance/matrix 응답을
+// lib/attendanceMatrix.ts 의 matrixToRows()로 파싱한 StudentRow[].
+// AbsenceRankChart와 store를 통해 공유되며, 강좌 선택 시 한 번만 fetch한다.
 //
 // 위험 가중치(15주 기준, 임시):
 //   결석   = 1.0 (F 커트라인: 보통 결석 5회 = F)
