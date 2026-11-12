@@ -6,7 +6,7 @@ These mirror components.schemas in ../../contracts/openapi.yaml exactly
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -48,6 +48,7 @@ class VerifyReason(str, Enum):
     nonce_reused = "nonce_reused"
     device_mismatch = "device_mismatch"
     duplicate_attendance = "duplicate_attendance"
+    not_enrolled = "not_enrolled"
 
 
 class RiskLevel(str, Enum):
@@ -209,6 +210,7 @@ class CreateCourseRequest(BaseModel):
     end_period: int | None = Field(default=None, ge=MIN_PERIOD, le=MAX_PERIOD)
     location: str | None = None
     credits: float | None = None
+    semester_start_date: date | None = None
 
     @model_validator(mode="after")
     def _check_period_order(self) -> "CreateCourseRequest":
@@ -227,6 +229,7 @@ class UpdateCourseRequest(BaseModel):
     end_period: int | None = Field(default=None, ge=MIN_PERIOD, le=MAX_PERIOD)
     location: str | None = None
     credits: float | None = None
+    semester_start_date: date | None = None
 
     @model_validator(mode="after")
     def _check_period_order(self) -> "UpdateCourseRequest":
@@ -245,6 +248,7 @@ class CourseOut(BaseModel):
     end_period: int | None = None
     location: str | None = None
     credits: float | None = None
+    semester_start_date: date | None = None
     created_at: datetime
 
 
@@ -341,9 +345,34 @@ class SessionOut(BaseModel):
     course_id: str
     week_number: int | None = None
     schedule_id: str | None = None
+    # Human-readable slot label (e.g. "월 1교시", "화 2~3교시") derived from the
+    # schedule_id at read time. Null for ad-hoc / legacy sessions.
+    schedule_label: str | None = None
     window_open: bool
     window_remaining: int
     phase: str
+
+
+class SessionEstimateRequest(BaseModel):
+    """Request an estimate of (week_number, schedule_id) for a new session.
+
+    The professor's open-session modal calls this to pre-fill the week + slot
+    from the current time + the course's semester_start_date + its weekly
+    schedule. Estimation does NOT create a session — the professor confirms or
+    edits, then calls createSession with the chosen values.
+    """
+
+    course_id: str
+
+
+class SessionEstimate(BaseModel):
+    """Estimated week + slot for a new session. All fields nullable: when
+    estimation is impossible (no semester_start_date, no matching slot, out of
+    semester range), the professor picks values manually."""
+
+    week_number: int | None = None
+    schedule_id: str | None = None
+    schedule_label: str | None = None
 
 
 class SessionToken(BaseModel):

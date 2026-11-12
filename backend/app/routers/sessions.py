@@ -21,6 +21,8 @@ from app.schemas import (
     CreateSessionRequest,
     ExtendWindowRequest,
     OpenCheckoutRequest,
+    SessionEstimate,
+    SessionEstimateRequest,
     SessionOut,
     SessionToken,
     SimulationCase,
@@ -28,6 +30,7 @@ from app.schemas import (
     VerifyReason,
 )
 from app.services.ownership import load_owned_session
+from app.services.session_estimate import estimate_session
 from app.services.tokens import get_or_rotate_tokens, issue_tokens
 from app.services.verify import run_verification
 from app.timeutil import as_aware, now as _now
@@ -45,13 +48,32 @@ def _window_state(session: Session) -> tuple[bool, int]:
     return True, remaining
 
 
-def _to_out(session: Session) -> SessionOut:
+async def _schedule_label(
+    db: AsyncSession, schedule_id: str | None
+) -> str | None:
+    """Human label for a session's schedule_id (e.g. '화 2~3교시'), or None."""
+    if schedule_id is None:
+        return None
+    slot = (
+        await db.execute(
+            select(CourseSchedule).where(CourseSchedule.id == schedule_id)
+        )
+    ).scalar_one_or_none()
+    if slot is None:
+        return None
+    from app.services.session_estimate import schedule_label as _label
+
+    return _label(slot)
+
+
+async def _to_out(db: AsyncSession, session: Session) -> SessionOut:
     is_open, remaining = _window_state(session)
     return SessionOut(
         session_id=session.id,
         course_id=session.course_id,
         week_number=session.week_number,
         schedule_id=session.schedule_id,
+        schedule_label=await _schedule_label(db, session.schedule_id),
         window_open=is_open,
         window_remaining=remaining,
         phase=session.phase,
@@ -62,6 +84,36 @@ async def _load_owned_session(
     db: AsyncSession, session_id: str, professor_id: str
 ) -> Session:
     return await load_owned_session(db, session_id, professor_id)
+
+
+@router.post(
+    "/estimate", response_model=SessionEstimate, operation_id="estimateSession",
+)
+async def estimate_session_endpoint(
+    body: SessionEstimateRequest,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> SessionEstimate:
+    """Estimate the week_number + schedule_id for a new session in this course.
+
+    Uses the current time + the course's semester_start_date + its weekly
+    CourseSchedule rows. Does NOT create a session — the professor's open-session
+    modal calls this to pre-fill the values, then the professor confirms/edits
+    and calls createSession. Professor-only; course owned by the caller.
+    """
+    course = (
+        await db.execute(select(Course).where(Course.id == body.course_id))
+    ).scalar_one_or_none()
+    if course is None or course.professor_id != prof.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not your course"
+        )
+    week, schedule_id, label = await estimate_session(
+        db, course=course, now=_now()
+    )
+    return SessionEstimate(
+        week_number=week, schedule_id=schedule_id, schedule_label=label
+    )
 
 
 @router.post(
@@ -105,7 +157,7 @@ async def create_session(
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.post(
@@ -128,7 +180,7 @@ async def extend_window(
     session.window_expires_at = base + timedelta(seconds=add_seconds)
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.post(
@@ -166,7 +218,7 @@ async def open_checkout(
     session.window_expires_at = now + timedelta(seconds=window)
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.post("/{id}/close", response_model=SessionOut, operation_id="closeSession")
@@ -179,7 +231,7 @@ async def close_session(
     session.phase = "closed"
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.get("/{id}/token", response_model=SessionToken, operation_id="getSessionToken")

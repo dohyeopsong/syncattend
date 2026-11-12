@@ -2,11 +2,12 @@
 Attendance verification logic — extracted so the real /attendance/verify
 endpoint and the simulation endpoint share ONE code path.
 
-The 4-step server verification (in order):
-  (1) auth window open        -> window_closed
-  (2) QR x audio cross-verify -> cross_verify_failed
-  (3) device_uuid matches     -> device_mismatch
-  (4) uniqueness (acct+device)-> duplicate_attendance
+The 5-step server verification (in order):
+  (1)   auth window open        -> window_closed
+  (1.5) enrolled in course      -> not_enrolled
+  (2)   QR x audio cross-verify -> cross_verify_failed
+  (3)   device_uuid matches     -> device_mismatch
+  (4)   uniqueness (acct+device)-> duplicate_attendance
 
 Dual-auth: the session phase (check_in / check_out) decides WHICH timestamp a
 successful verify records. A verify in check_in sets check_in_verified_at; in
@@ -24,7 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models import Attendance, Device, Session
+from app.models import Attendance, Device, Enrollment, Session
 from app.redis_client import get_redis
 from app.schemas import CheckPhase, VerifyReason, VerifyResult, VerifyStatus
 from app.services.aggregate import absence_count, risk_warning_for
@@ -63,6 +64,24 @@ async def run_verification(
     if not window_open:
         return VerifyOutcome(
             _rejected(VerifyReason.window_closed, cross=False, device=False), True
+        )
+
+    # (1.5) enrollment — the student must be enrolled in the session's course.
+    # Without this, a student who happens to learn a session id (e.g. from a
+    # classmate's QR payload) could create an Attendance row in a course they
+    # never registered for. The row would be invisible to the professor's roster
+    # (which is built from Enrollment) and orphaned in the DB.
+    enrolled = (
+        await db.execute(
+            select(Enrollment).where(
+                Enrollment.course_id == session.course_id,
+                Enrollment.student_id == student_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if enrolled is None:
+        return VerifyOutcome(
+            _rejected(VerifyReason.not_enrolled, cross=False, device=False), True
         )
 
     # (2) QR x audio cross-verify

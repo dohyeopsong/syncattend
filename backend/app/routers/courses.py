@@ -63,6 +63,7 @@ def _course_out(c: Course) -> CourseOut:
         end_period=c.end_period,
         location=c.location,
         credits=float(c.credits) if c.credits is not None else None,
+        semester_start_date=c.semester_start_date,
         created_at=c.created_at,
     )
 
@@ -107,6 +108,7 @@ async def create_course(
         end_period=body.end_period,
         location=body.location,
         credits=body.credits,
+        semester_start_date=body.semester_start_date,
     )
     db.add(course)
     await db.commit()

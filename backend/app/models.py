@@ -8,11 +8,12 @@ SQLite (tests). UUIDs are stored as strings for cross-DB portability.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -96,6 +97,10 @@ class Course(Base):
     end_period: Mapped[int | None] = mapped_column(Integer)         # 종료 교시
     location: Mapped[str | None] = mapped_column(String(255))       # 강의실
     credits: Mapped[float | None] = mapped_column(Numeric(3, 1))    # 학점
+    # Semester start date (Monday of week 1) for auto week-number estimation
+    # of new sessions. Per-course so the next semester can differ. NULL means
+    # estimation is impossible -> the professor picks the week manually.
+    semester_start_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (

@@ -622,6 +622,32 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------ sessions
+  /sessions/estimate:
+    post:
+      tags: [sessions]
+      summary: Estimate the week + slot for a new session (no creation)
+      description: >
+        Pre-fills the open-session modal: derives week_number from the course's
+        semester_start_date and matches the current day/time against the course's
+        weekly CourseSchedule slots. Does NOT create a session — the professor
+        confirms or edits the estimate, then calls createSession. Professor-only;
+        course owned by the caller. All fields are nullable when estimation is
+        impossible (no semester_start_date, no matching slot, out of semester).
+      operationId: estimateSession
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionEstimateRequest' }
+      responses:
+        '200':
+          description: Estimated week + slot (all nullable)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionEstimate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /sessions:
     post:
       tags: [sessions]
@@ -644,6 +670,11 @@ paths:
                   maximum: 15
                   nullable: true
                   description: academic week (1..15주차); optional
+                schedule_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: which weekly slot this session belongs to (Mon vs Tue); optional
       responses:
         '201':
           description: Session created, window open
@@ -1099,6 +1130,15 @@ components:
           description: 종료 교시 (1..12, >= start_period).
         location: { type: string, nullable: true, description: 강의실 }
         credits: { type: number, nullable: true, description: 학점 }
+        semester_start_date:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            학기 시작일 (1주차의 월요일). New sessions auto-estimate their
+            week_number from (today - semester_start_date). Per-course so the
+            next semester can differ. NULL means estimation is impossible and
+            the professor picks the week manually.
 
     UpdateCourseRequest:
       type: object
@@ -1123,6 +1163,11 @@ components:
           description: 종료 교시 (1..12, >= start_period).
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
+        semester_start_date:
+          type: string
+          format: date
+          nullable: true
+          description: 학기 시작일 (1주차 월요일) for week auto-estimation.
 
     Course:
       type: object
@@ -1138,6 +1183,7 @@ components:
         end_period: { type: integer, nullable: true }
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
+        semester_start_date: { type: string, format: date, nullable: true }
         created_at: { type: string, format: date-time }
 
     CourseCatalogItem:
@@ -1200,6 +1246,15 @@ components:
         session_id: { type: string }
         course_id: { type: string }
         week_number: { type: integer, minimum: 1, maximum: 15, nullable: true, description: academic week (1..15주차) }
+        schedule_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: which weekly CourseSchedule slot this session belongs to (e.g. the Mon slot vs the Tue slot).
+        schedule_label:
+          type: string
+          nullable: true
+          description: human-readable slot label derived from schedule_id (e.g. "월 1교시", "화 2~3교시"). Null for ad-hoc / legacy sessions.
         window_open: { type: boolean }
         window_remaining: { type: integer, description: seconds left in the currently active auth window }
         phase:
@@ -1209,6 +1264,35 @@ components:
             Attendance lifecycle phase. check_in = the start-of-class auth
             window is open; check_out = the end-of-class auth window is open
             (professor opened checkout); closed = session finalised.
+
+    SessionEstimateRequest:
+      type: object
+      required: [course_id]
+      properties:
+        course_id: { type: string }
+
+    SessionEstimate:
+      type: object
+      description: >
+        Estimated week + slot for a new session. All fields nullable: when
+        estimation is impossible (no semester_start_date, no matching slot, out
+        of semester range), the professor picks values manually.
+      properties:
+        week_number:
+          type: integer
+          minimum: 1
+          maximum: 15
+          nullable: true
+          description: estimated academic week (1..15), or null if before/past the semester or no start date.
+        schedule_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: matched CourseSchedule slot id for the current day/time, or null.
+        schedule_label:
+          type: string
+          nullable: true
+          description: human-readable label for the matched slot (e.g. "월 1교시"), or null.
 
     SessionToken:
       type: object
@@ -1263,7 +1347,7 @@ components:
         device_matched: { type: boolean }
         reason:
           type: string
-          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          enum: [window_closed, not_enrolled, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
         check_phase:
           type: string
@@ -1282,12 +1366,12 @@ components:
         expected_rejected: { type: boolean }
         expected_reason:
           type: string
-          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          enum: [window_closed, not_enrolled, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
         rejected: { type: boolean }
         reason:
           type: string
-          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          enum: [window_closed, not_enrolled, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
         passed: { type: boolean, description: True if the actual outcome matched the expected }
 

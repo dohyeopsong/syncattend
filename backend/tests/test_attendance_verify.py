@@ -429,3 +429,33 @@ async def test_correct_attendance_existing_record_succeeds(client, session):
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "absent"
     assert r.json()["record_id"] == record_id
+
+
+async def test_reject_not_enrolled(client, session):
+    """A student NOT enrolled in the course cannot verify, even with a valid
+    token + their own bound device. Prevents orphaned Attendance rows from
+    students who learned a session id out-of-band."""
+    ctx = await _setup(client, session)
+
+    # A second student with a bound device but NO enrollment in this course.
+    other = await seed_user(
+        session, f"o_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student"
+    )
+    other_dev = str(uuid.uuid4())
+    other_hdr = auth_header(other.id, "student")
+    await client.post(
+        "/devices/register", json={"device_uuid": other_dev}, headers=other_hdr
+    )
+
+    r = await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": ctx["session"].id,
+            "qr_token": ctx["tok"]["qr_token"],
+            "audio_nonce": ctx["tok"]["audio_nonce"],
+            "device_uuid": other_dev,
+        },
+        headers=other_hdr,
+    )
+    assert r.status_code == 409
+    assert r.json()["reason"] == "not_enrolled"
