@@ -28,7 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Attendance, Device, Enrollment, Session
 from app.redis_client import get_redis
 from app.schemas import CheckPhase, VerifyReason, VerifyResult, VerifyStatus
-from app.services.aggregate import absence_count, risk_warning_for
+from app.services.aggregate import absence_count, invalidate_course_matrix, risk_warning_for
+from app.services.events import notify_session_changed, notify_student_changed
 from app.services.tokens import cross_verify
 from app.timeutil import as_aware, now as _now
 
@@ -174,6 +175,22 @@ async def run_verification(
             )
 
     absences = await absence_count(db, student_id, course_id=session.course_id)
+    # Notify SSE subscribers that this session's attendance (and the student's
+    # risk band) may have changed, so they wake and re-query — replacing the old
+    # 2-second DB-poll loop. Best-effort; a missed publish falls back to the
+    # timer in wait_for_change.
+    await notify_session_changed(session.id)
+    await notify_student_changed(student_id)
+    # Invalidate the course's cached matrix so the next read reflects this verify.
+    await invalidate_course_matrix(session.course_id)
+    # Reflect the actual row state AFTER this verify so the app can show 1차/2차
+    # completion accurately even when its UI state was reset (autoDispose).
+    if existing is not None:
+        check_in_done = existing.check_in_verified_at is not None
+        check_out_done = existing.check_out_verified_at is not None
+    else:
+        check_in_done = phase == "check_in"
+        check_out_done = phase == "check_out"
     return VerifyOutcome(
         VerifyResult(
             status=VerifyStatus.verified,
@@ -181,6 +198,8 @@ async def run_verification(
             device_matched=True,
             reason=None,
             check_phase=CheckPhase(phase),
+            check_in_done=check_in_done,
+            check_out_done=check_out_done,
             risk_warning=risk_warning_for(absences),
         ),
         False,

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import random
 import uuid
+from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import or_, select
@@ -50,7 +51,20 @@ router = APIRouter(prefix="/courses", tags=["courses"])
 me_router = APIRouter(prefix="/me", tags=["courses"])
 
 
-def _course_out(c: Course) -> CourseOut:
+_UNSET: object = object()
+
+
+def _course_out(
+    c: Course,
+    *,
+    day_of_week: object = _UNSET,
+    start_period: object = _UNSET,
+    end_period: object = _UNSET,
+    schedules: Sequence[CourseSchedule] = (),
+) -> CourseOut:
+    # Keyword overrides let list endpoints pass schedule-backed values when the
+    # scalar columns are NULL (see _resolve_day_period_bulk). When unset, the
+    # scalar columns on the row are used verbatim (create/update path).
     return CourseOut(
         id=c.id,
         professor_id=c.professor_id,
@@ -58,14 +72,132 @@ def _course_out(c: Course) -> CourseOut:
         code=c.code,
         department=c.department,
         professor_name=c.professor_name,
-        day_of_week=c.day_of_week,
-        start_period=c.start_period,
-        end_period=c.end_period,
+        day_of_week=c.day_of_week if day_of_week is _UNSET else day_of_week,  # type: ignore[arg-type]
+        start_period=c.start_period if start_period is _UNSET else start_period,  # type: ignore[arg-type]
+        end_period=c.end_period if end_period is _UNSET else end_period,  # type: ignore[arg-type]
         location=c.location,
         credits=float(c.credits) if c.credits is not None else None,
         semester_start_date=c.semester_start_date,
         created_at=c.created_at,
+        schedules=[_schedule_out(s) for s in schedules],
     )
+
+
+async def _load_schedules_bulk(
+    db: AsyncSession, course_ids: list[str]
+) -> dict[str, list[CourseSchedule]]:
+    """All weekly slots for the given courses, grouped by course_id and ordered
+    by day then start_period. One batched query (no N+1). Used to populate the
+    `schedules` array on list / catalog / my-courses responses."""
+    if not course_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(CourseSchedule)
+            .where(CourseSchedule.course_id.in_(course_ids))
+            .order_by(
+                CourseSchedule.course_id,
+                CourseSchedule.day_of_week,
+                CourseSchedule.start_period,
+            )
+        )
+    ).scalars().all()
+    grouped: dict[str, list[CourseSchedule]] = {}
+    for s in rows:
+        grouped.setdefault(s.course_id, []).append(s)
+    return grouped
+
+
+async def _resolve_day_period_bulk(
+    db: AsyncSession, courses: list[Course]
+) -> list[tuple[int | None, int | None, int | None]]:
+    """Resolve (day_of_week, start_period, end_period) for each course.
+
+    Primary source is the scalar columns on `courses` (backward compatible).
+    When any of the three is NULL, fall back to the earliest `course_schedules`
+    row (ordered by day then start_period) so a course whose timetable lives
+    only in the normalized table still surfaces its day/period in the list /
+    catalog / my-courses responses — which is exactly what the web "강좌 검색 →
+    자동 채우기" flow reads. One batched query for all missing courses (no N+1).
+    """
+    resolved: list[tuple[int | None, int | None, int | None]] = [
+        (c.day_of_week, c.start_period, c.end_period) for c in courses
+    ]
+    missing_idx = [
+        i
+        for i, c in enumerate(courses)
+        if c.day_of_week is None or c.start_period is None or c.end_period is None
+    ]
+    if not missing_idx:
+        return resolved
+    missing_ids = [courses[i].id for i in missing_idx]
+    rows = (
+        await db.execute(
+            select(CourseSchedule)
+            .where(CourseSchedule.course_id.in_(missing_ids))
+            .order_by(
+                CourseSchedule.course_id,
+                CourseSchedule.day_of_week,
+                CourseSchedule.start_period,
+            )
+        )
+    ).scalars().all()
+    # Ordered by course_id first, so the first row seen per course is its
+    # earliest slot; setdefault keeps only that one.
+    first: dict[str, CourseSchedule] = {}
+    for s in rows:
+        first.setdefault(s.course_id, s)
+    for j, i in enumerate(missing_idx):
+        slot = first.get(missing_ids[j])
+        if slot is not None:
+            resolved[i] = (slot.day_of_week, slot.start_period, slot.end_period)
+    return resolved
+
+
+def _first_slot_triple(
+    slots: Sequence[CourseSchedule],
+) -> tuple[int | None, int | None, int | None]:
+    """(day, start, end) of the earliest slot, or (None, None, None) when empty.
+    Used to mirror the scalar columns from the normalized slots so the two
+    representations never disagree."""
+    if not slots:
+        return (None, None, None)
+    earliest = min(slots, key=lambda s: (s.day_of_week, s.start_period))
+    return (earliest.day_of_week, earliest.start_period, earliest.end_period)
+
+
+async def _reconcile_schedules(
+    db: AsyncSession,
+    course: Course,
+    new_slots: list[CreateScheduleRequest],
+) -> list[CourseSchedule]:
+    """Replace the course's weekly slots with exactly `new_slots` (deduped by
+    (day, start_period)). Returns the created rows. The caller is responsible
+    for re-mirroring the scalar columns afterwards."""
+    existing = (
+        await db.execute(
+            select(CourseSchedule).where(CourseSchedule.course_id == course.id)
+        )
+    ).scalars().all()
+    for s in existing:
+        await db.delete(s)
+    created: list[CourseSchedule] = []
+    seen: set[tuple[int, int]] = set()
+    for spec in new_slots:
+        key = (spec.day_of_week, spec.start_period)
+        if key in seen:
+            continue
+        seen.add(key)
+        slot = CourseSchedule(
+            course_id=course.id,
+            day_of_week=spec.day_of_week,
+            start_period=spec.start_period,
+            end_period=spec.end_period,
+        )
+        db.add(slot)
+        created.append(slot)
+    await db.flush()
+    return created
 
 
 async def _load_owned_course(
@@ -111,9 +243,36 @@ async def create_course(
         semester_start_date=body.semester_start_date,
     )
     db.add(course)
+    await db.flush()  # need course.id before creating dependent schedule rows
+
+    # Multi-day slots: if `schedules` provided, create one row per slot and
+    # mirror the scalar columns from the earliest one. If `schedules` is absent
+    # but the scalar day_of_week was set, mirror it into a single schedule row
+    # so the normalized table stays consistent with the scalar (single source).
+    created_slots: list[CourseSchedule] = []
+    if body.schedules is not None:
+        created_slots = await _reconcile_schedules(db, course, body.schedules)
+        d, s, e = _first_slot_triple(created_slots)
+        course.day_of_week = d
+        course.start_period = s
+        course.end_period = e
+    elif body.day_of_week is not None and body.start_period is not None and body.end_period is not None:
+        slot = CourseSchedule(
+            course_id=course.id,
+            day_of_week=body.day_of_week,
+            start_period=body.start_period,
+            end_period=body.end_period,
+        )
+        db.add(slot)
+        await db.flush()
+        created_slots = [slot]
+
     await db.commit()
     await db.refresh(course)
-    return _course_out(course)
+    # Refresh the created slots so their ids are populated for ScheduleOut.
+    for s in created_slots:
+        await db.refresh(s)
+    return _course_out(course, schedules=created_slots)
 
 
 @router.get("", response_model=list[CourseOut], operation_id="listCourses")
@@ -128,7 +287,18 @@ async def list_courses(
             .order_by(Course.created_at)
         )
     ).scalars().all()
-    return [_course_out(c) for c in rows]
+    resolved = await _resolve_day_period_bulk(db, rows)
+    by_course = await _load_schedules_bulk(db, [c.id for c in rows])
+    return [
+        _course_out(
+            c,
+            day_of_week=d,
+            start_period=s,
+            end_period=e,
+            schedules=by_course.get(c.id, []),
+        )
+        for c, (d, s, e) in zip(rows, resolved)
+    ]
 
 
 @router.patch(
@@ -141,9 +311,19 @@ async def update_course(
     db: AsyncSession = Depends(get_db),
 ) -> CourseOut:
     course = await _load_owned_course(db, course_id, prof.id)
+    dump = body.model_dump(exclude_unset=True)
+    # `schedules` is reconciled separately (it maps to child rows, not a
+    # scalar column) — pull it out before applying the rest via setattr.
+    new_slots = dump.pop("schedules", None)
     # Apply only fields the client actually sent (partial update).
-    for field, value in body.model_dump(exclude_unset=True).items():
+    for field, value in dump.items():
         setattr(course, field, value)
+    if new_slots is not None:
+        created = await _reconcile_schedules(db, course, body.schedules or [])
+        d, s, e = _first_slot_triple(created)
+        course.day_of_week = d
+        course.start_period = s
+        course.end_period = e
     # After merge, guard the period pair on the resulting row (a partial update
     # that sets only one period could otherwise invert start/end). Same rule as
     # the request schemas — see schemas.period_order_ok.
@@ -154,7 +334,14 @@ async def update_course(
         )
     await db.commit()
     await db.refresh(course)
-    return _course_out(course)
+    slots = (
+        await db.execute(
+            select(CourseSchedule)
+            .where(CourseSchedule.course_id == course.id)
+            .order_by(CourseSchedule.day_of_week, CourseSchedule.start_period)
+        )
+    ).scalars().all()
+    return _course_out(course, schedules=slots)
 
 
 @router.delete(
@@ -496,8 +683,9 @@ async def list_course_catalog(
     planning). Flags which ones the caller is already enrolled in.
 
     Optional `q` filters by course name, professor name, or 학수번호 (ILIKE,
-    case-insensitive substring). Absent/blank `q` returns everything (the
-    original behavior — backward compatible)."""
+    case-insensitive substring). Absent/blank `q` returns a bounded recent
+    slice (not the entire catalog) so a cold load doesn't pull thousands of
+    rows. With a search term, results are capped to the first 50 matches."""
     stmt = select(Course)
     if q is not None and q.strip():
         pattern = f"%{q.strip()}%"
@@ -508,7 +696,10 @@ async def list_course_catalog(
                 Course.code.ilike(pattern),
             )
         )
-    courses = (await db.execute(stmt.order_by(Course.name))).scalars().all()
+    # Cap results so a broad/blank search never serializes the full catalog
+    # (the DB has ~2000 courses). 50 is plenty for an autocomplete dropdown.
+    stmt = stmt.order_by(Course.name).limit(50)
+    courses = (await db.execute(stmt)).scalars().all()
     my_ids = set(
         (
             await db.execute(
@@ -516,6 +707,8 @@ async def list_course_catalog(
             )
         ).scalars().all()
     )
+    resolved = await _resolve_day_period_bulk(db, courses)
+    by_course = await _load_schedules_bulk(db, [c.id for c in courses])
     return [
         CourseCatalogItem(
             id=c.id,
@@ -524,14 +717,15 @@ async def list_course_catalog(
             code=c.code,
             department=c.department,
             professor_name=c.professor_name,
-            day_of_week=c.day_of_week,
-            start_period=c.start_period,
-            end_period=c.end_period,
+            day_of_week=d,
+            start_period=s,
+            end_period=e,
             location=c.location,
             credits=float(c.credits) if c.credits is not None else None,
             enrolled=c.id in my_ids,
+            schedules=[_schedule_out(sl) for sl in by_course.get(c.id, [])],
         )
-        for c in courses
+        for c, (d, s, e) in zip(courses, resolved)
     ]
 
 
@@ -625,6 +819,8 @@ async def list_my_courses(
             .order_by(Course.day_of_week, Course.start_period, Course.name)
         )
     ).scalars().all()
+    resolved = await _resolve_day_period_bulk(db, rows)
+    by_course = await _load_schedules_bulk(db, [c.id for c in rows])
     return [
         MyCourseItem(
             id=c.id,
@@ -633,11 +829,12 @@ async def list_my_courses(
             code=c.code,
             department=c.department,
             professor_name=c.professor_name,
-            day_of_week=c.day_of_week,
-            start_period=c.start_period,
-            end_period=c.end_period,
+            day_of_week=d,
+            start_period=s,
+            end_period=e,
             location=c.location,
             credits=float(c.credits) if c.credits is not None else None,
+            schedules=[_schedule_out(sl) for sl in by_course.get(c.id, [])],
         )
-        for c in rows
+        for c, (d, s, e) in zip(rows, resolved)
     ]

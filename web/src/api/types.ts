@@ -22,6 +22,14 @@ export interface RefreshRequest {
 // day_of_week: 0=Mon … 6=Sun (per contract), null when unscheduled.
 export type DayOfWeek = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
+// A weekly slot as sent in create/update payloads (no id yet). Mirrors the
+// contract's CreateScheduleRequest.
+export interface ScheduleSlotInput {
+  day_of_week: DayOfWeek;
+  start_period: number;
+  end_period: number;
+}
+
 export interface Course {
   id: string;
   professor_id: string;
@@ -36,6 +44,7 @@ export interface Course {
   credits: number | null;
   semester_start_date: string | null; // ISO date (YYYY-MM-DD); 1주차 월요일
   created_at: string;
+  schedules: CourseScheduleSlot[]; // all weekly slots (multi-day support)
 }
 
 // name required; schedule fields optional. Mirrors CreateCourseRequest.
@@ -50,6 +59,9 @@ export interface CreateCourseRequest {
   location?: string | null;
   credits?: number | null;
   semester_start_date?: string | null;
+  // Multi-day weekly slots. null = leave scalar fields as-is; a list (even
+  // empty) reconciles the course's slots to exactly those entries.
+  schedules?: ScheduleSlotInput[] | null;
 }
 
 // PATCH — every field optional (partial update). Mirrors UpdateCourseRequest.
@@ -70,6 +82,7 @@ export interface CourseCatalogItem {
   location: string | null;
   credits: number | null;
   enrolled?: boolean;
+  schedules: CourseScheduleSlot[];
 }
 
 export interface Enrollment {
@@ -90,6 +103,10 @@ export interface Session {
   window_open: boolean;
   window_remaining: number; // seconds left in the currently active auth window
   phase: "check_in" | "check_out" | "closed";
+  // True once the professor opened the 2차 (check_out) window at least once.
+  // The UI uses this to show "2차 인증 열기" only when the second phase hasn't
+  // happened yet (phase alone can't tell closed-after-1차 from closed-after-2차).
+  checkout_opened: boolean;
 }
 
 // Estimate (week + slot) for a new session. POST /sessions/estimate.
@@ -97,6 +114,11 @@ export interface SessionEstimate {
   week_number: number | null;
   schedule_id: string | null;
   schedule_label: string | null;
+  // Which auth round to default to. "check_out" when a closed session for the
+  // estimated week+slot already has 1차 done but 2차 not opened — the modal
+  // calls openCheckout on pending_session_id instead of createSession.
+  suggested_phase: "check_in" | "check_out";
+  pending_session_id: string | null;
 }
 
 // One weekly time slot of a course. GET /courses/{course_id}/schedules.
@@ -160,6 +182,20 @@ export interface UnverifiedStudent {
   name?: string | null; // display name
 }
 
+// One enrolled student's per-phase state for the 결석자 검토 roster. The final
+// status is derived from the two timestamps (present=both, early_leave=1차 only,
+// late=2차 only, absent=neither); `pending` until the session is closed.
+// check_in_done / check_out_done expose the raw 1차/2차 result so the review
+// table can render each phase independently of the derived status.
+export interface RosterStudent {
+  student_id: string; // internal user id (UUID) — the Delta/batch key
+  student_number?: string | null; // school 학번
+  name?: string | null; // display name
+  status: AttendanceStatus;
+  check_in_done: boolean; // 1차 (check_in) timestamp present
+  check_out_done: boolean; // 2차 (check_out) timestamp present
+}
+
 export interface AttendanceAggregate {
   session_id: string;
   total: number;
@@ -167,7 +203,8 @@ export interface AttendanceAggregate {
   absent: number;
   late: number; // resolved (closed session) only
   early_leave: number; // resolved (closed session) only
-  unverified: UnverifiedStudent[]; // readable student summaries, not raw UUIDs
+  unverified: UnverifiedStudent[]; // readable student summaries (backward compat)
+  roster: RosterStudent[]; // full per-student roster with 1차/2차 state
 }
 
 // One enrolled student's per-week status across the semester (15 weeks).

@@ -211,6 +211,11 @@ class CreateCourseRequest(BaseModel):
     location: str | None = None
     credits: float | None = None
     semester_start_date: date | None = None
+    # Multi-day weekly slots (1:N). When provided, CourseSchedule rows are
+    # created for each entry and the scalar day/period columns are mirrored
+    # from the earliest slot (backward compat for list ordering / consumers
+    # that still read the scalar). None (absent) = use the scalar fields only.
+    schedules: list[CreateScheduleRequest] | None = Field(default=None)
 
     @model_validator(mode="after")
     def _check_period_order(self) -> "CreateCourseRequest":
@@ -230,6 +235,11 @@ class UpdateCourseRequest(BaseModel):
     location: str | None = None
     credits: float | None = None
     semester_start_date: date | None = None
+    # Reconcile the course's weekly slots to EXACTLY this list when present in
+    # the request body (a list, even empty, clears all slots). Absent (None)
+    # leaves existing slots untouched. The scalar columns are re-mirrored from
+    # the earliest surviving slot so they stay consistent.
+    schedules: list[CreateScheduleRequest] | None = Field(default=None)
 
     @model_validator(mode="after")
     def _check_period_order(self) -> "UpdateCourseRequest":
@@ -250,6 +260,9 @@ class CourseOut(BaseModel):
     credits: float | None = None
     semester_start_date: date | None = None
     created_at: datetime
+    # All weekly slots (multi-day support). Ordered by day then start_period.
+    # Empty for ad-hoc / legacy courses with only the scalar columns.
+    schedules: list[ScheduleOut] = Field(default_factory=list)
 
 
 class CourseCatalogItem(BaseModel):
@@ -267,6 +280,7 @@ class CourseCatalogItem(BaseModel):
     location: str | None = None
     credits: float | None = None
     enrolled: bool = False  # whether the calling student is enrolled
+    schedules: list[ScheduleOut] = Field(default_factory=list)
 
 
 class MyCourseItem(BaseModel):
@@ -283,6 +297,7 @@ class MyCourseItem(BaseModel):
     end_period: int | None = None
     location: str | None = None
     credits: float | None = None
+    schedules: list[ScheduleOut] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------- course schedules
@@ -351,6 +366,10 @@ class SessionOut(BaseModel):
     window_open: bool
     window_remaining: int
     phase: str
+    # True once the professor opened the 2차 (check_out) window at least once.
+    # The UI uses this to show "2차 인증 열기" only when the second phase hasn't
+    # happened yet (phase alone can't tell closed-after-1차 from closed-after-2차).
+    checkout_opened: bool = False
 
 
 class SessionEstimateRequest(BaseModel):
@@ -368,11 +387,20 @@ class SessionEstimateRequest(BaseModel):
 class SessionEstimate(BaseModel):
     """Estimated week + slot for a new session. All fields nullable: when
     estimation is impossible (no semester_start_date, no matching slot, out of
-    semester range), the professor picks values manually."""
+    semester range), the professor picks values manually.
+
+    `suggested_phase` tells the open-session modal whether to default to 1차
+    (check_in) or 2차 (check_out): if a closed session for the estimated
+    week+slot already has check_in done but NOT check_out (checkout_opened
+    False), the professor is re-opening for 2차 → `pending_session_id` is that
+    session's id so the modal can call openCheckout instead of createSession.
+    """
 
     week_number: int | None = None
     schedule_id: str | None = None
     schedule_label: str | None = None
+    suggested_phase: str = "check_in"
+    pending_session_id: str | None = None
 
 
 class SessionToken(BaseModel):
@@ -406,6 +434,13 @@ class VerifyResult(BaseModel):
     # Which phase this verify attempt counted towards (check_in / check_out).
     # Set on a successful verify; None on rejection.
     check_phase: CheckPhase | None = None
+    # Whether the student's attendance row has the 1차 (check_in) / 2차
+    # (check_out) timestamp set AFTER this verify. The app uses these to show
+    # 1차/2차 completion accurately even after its UI state is reset (the
+    # provider is autoDispose), and to surface the final attendance outcome:
+    # both done → 출석, 1차 only → 조퇴, 2차 only → 지각.
+    check_in_done: bool = False
+    check_out_done: bool = False
     risk_warning: RiskWarning | None = None
 
 
@@ -454,6 +489,24 @@ class UnverifiedStudent(BaseModel):
     name: str | None = None  # display name, joined from the user
 
 
+class RosterStudent(BaseModel):
+    """One enrolled student's per-phase verification state for a session, used
+    by the professor's 결석자 검토 roster. The final status is derived from the
+    two phase timestamps:
+      both passed   -> present
+      check_in only -> early_leave (조퇴)
+      check_out only-> late (지각)
+      neither       -> absent (after close) / pending (before close)
+    `check_in_done` / `check_out_done` expose the raw 1차/2차 result so the
+    review table can render each phase independently of the derived status."""
+    student_id: str  # internal user id (UUID) — the Delta/batch key
+    student_number: str | None = None  # school 학번, joined from the user
+    name: str | None = None  # display name, joined from the user
+    status: AttendanceStatus = AttendanceStatus.pending
+    check_in_done: bool = False  # 1차 (check_in) timestamp present
+    check_out_done: bool = False  # 2차 (check_out) timestamp present
+
+
 class AttendanceAggregate(BaseModel):
     session_id: str
     total: int
@@ -462,6 +515,10 @@ class AttendanceAggregate(BaseModel):
     late: int = 0
     early_leave: int = 0
     unverified: list[UnverifiedStudent] = Field(default_factory=list)
+    # Full per-student roster with 1차/2차 phase state + derived status. Supersedes
+    # the `unverified` list for the review table (which needs every student, not
+    # just the pending ones). `unverified` is kept for backward compatibility.
+    roster: list[RosterStudent] = Field(default_factory=list)
 
 
 class AttendanceMatrixStudent(BaseModel):

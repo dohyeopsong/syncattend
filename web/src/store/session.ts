@@ -21,8 +21,11 @@ interface SessionState {
     opts?: { windowSeconds?: number; weekNumber?: number | null; scheduleId?: string | null },
   ) => Promise<Session | null>;
   extend: (addSeconds?: number) => Promise<void>;
-  /** Open the check_out (end-of-class) auth window: check_in → check_out. */
+  /** Open the check_out (end-of-class) auth window on the CURRENT session. */
   openCheckout: (windowSeconds?: number) => Promise<void>;
+  /** Open check_out on a SPECIFIC session (2차 re-open from the open-session
+   *  modal, which knows the pending_session_id from the estimate). */
+  openCheckoutById: (sessionId: string, windowSeconds?: number) => Promise<void>;
   close: () => Promise<void>;
   refreshToken: () => Promise<void>;
   startTokenPolling: (intervalMs?: number) => void;
@@ -85,22 +88,50 @@ export const useSessionStore = create<SessionState>((set, get) => ({
     }
   },
 
+  openCheckoutById: async (sessionId, windowSeconds = 60) => {
+    set({ error: null });
+    try {
+      const session = await apiCheckout(sessionId, windowSeconds);
+      set({ session });
+      await get().refreshToken();
+    } catch (e) {
+      set({ error: toMessage(e) });
+    }
+  },
+
   close: async () => {
     const s = get().session;
     if (!s) return;
     get().stopTokenPolling();
+    // Optimistically close locally FIRST so the QR/audio stops immediately and
+    // the review popup opens — even if the backend call is slow or fails. The
+    // server-side close is best-effort; if it errors we still transition the UI
+    // (the professor already decided to end the round).
+    set((state) => ({
+      session: state.session
+        ? { ...state.session, phase: "closed", window_open: false, window_remaining: 0 }
+        : state.session,
+      token: null,
+      reviewOpen: true,
+    }));
     try {
       const session = await apiClose(s.session_id);
-      // 세션 닫기 → 결석자 검토 팝업 자동 오픈.
-      set({ session, reviewOpen: true });
-    } catch (e) {
-      set({ error: toMessage(e) });
+      set({ session });
+    } catch {
+      // Backend close failed — the UI already transitioned above. Leave the
+      // local closed state; the professor can re-open for 2차 later.
     }
   },
 
   refreshToken: async () => {
     const s = get().session;
     if (!s) return;
+    // closed 세션에서는 토큰을 발급하지 않는다 (백엔드가 409를 반환).
+    // 폴링이 중지되지 않은 채로 close가 완료된 직후 한 번 더 호출되는 것을 방지.
+    if (s.phase === "closed") {
+      set({ token: null });
+      return;
+    }
     try {
       const token = await apiToken(s.session_id);
       // Keep the session window state in sync with the token payload.
@@ -115,7 +146,8 @@ export const useSessionStore = create<SessionState>((set, get) => ({
           : state.session,
       }));
     } catch (e) {
-      set({ error: toMessage(e) });
+      // 409 (session closed) → 토큰 폐기. 다른 에러는 표시.
+      set({ token: null, error: toMessage(e) });
     }
   },
 

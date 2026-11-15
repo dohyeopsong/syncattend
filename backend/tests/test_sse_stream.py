@@ -62,7 +62,7 @@ async def test_sse_session_emits_attendance_after_verify(client, session):
     )
     assert verify.status_code == 200, verify.text
 
-    evt = await _first(session_attendance_events(session, sess.id, poll_seconds=0.01))
+    evt = await _first(session_attendance_events(session, sess.id))
     assert evt["event"] == "attendance"
     payload = json.loads(evt["data"])
     assert payload["session_id"] == sess.id
@@ -88,7 +88,7 @@ async def test_sse_student_emits_risk_after_absences(client, session):
         )
         assert r.status_code == 200, r.text
 
-    evt = await _first(student_risk_events(session, student.id, poll_seconds=0.01))
+    evt = await _first(student_risk_events(session, student.id))
     assert evt["event"] == "risk"
     payload = json.loads(evt["data"])
     assert payload["absences"] >= 2
@@ -96,10 +96,11 @@ async def test_sse_student_emits_risk_after_absences(client, session):
 
 
 async def test_sse_student_no_event_when_no_risk(client, session):
-    """A student with zero absences yields no event within the poll window
-    (generator stays pending) — first event must not appear immediately."""
+    """A student with zero absences yields no event: the generator emits the
+    first event only when a risk band is reached, then blocks on the pub/sub
+    channel (no immediate spurious event for a clean student)."""
     student = await seed_user(session, f"s_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student")
-    agen = student_risk_events(session, student.id, poll_seconds=0.01)
+    agen = student_risk_events(session, student.id)
     try:
         got = None
         try:

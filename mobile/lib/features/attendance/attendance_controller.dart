@@ -295,18 +295,22 @@ class AttendanceController extends StateNotifier<AttendanceState> {
 
       // Record which dual-auth phase just succeeded so the UI can show
       // 시작/종료 인증 완료 separately and offer the second-phase capture.
-      // These flags accumulate (never reset on a failure) so a retry of the
-      // SAME phase after a verified result keeps the earlier success.
-      final phaseDone = result.status == VerifyStatus.verified
-          ? result.checkPhase
-          : null;
+      // The server returns the ACTUAL row state (check_in_done / check_out_done)
+      // after this verify, so we trust it over the local accumulator — this
+      // stays correct even when the autoDispose provider was reset between the
+      // 1차 (수업 시작) and 2차 (수업 종료) captures, which typically happen in
+      // separate screen sessions.
+      final newCheckIn = result.status == VerifyStatus.verified
+          ? result.checkInDone
+          : state.checkInDone;
+      final newCheckOut = result.status == VerifyStatus.verified
+          ? result.checkOutDone
+          : state.checkOutDone;
       state = state.copyWith(
         phase: VerifyPhase.done,
         result: result,
-        checkInDone:
-            state.checkInDone || phaseDone == CheckPhase.checkIn,
-        checkOutDone:
-            state.checkOutDone || phaseDone == CheckPhase.checkOut,
+        checkInDone: state.checkInDone || newCheckIn,
+        checkOutDone: state.checkOutDone || newCheckOut,
       );
     } on ApiError catch (e) {
       state = state.copyWith(phase: VerifyPhase.error, error: e.detail);

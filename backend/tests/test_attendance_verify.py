@@ -55,6 +55,9 @@ async def test_verify_success(client, session):
     assert data["cross_verified"] is True
     assert data["device_matched"] is True
     assert data["reason"] is None
+    # 1차 only after the first verify: check_in_done true, check_out_done false.
+    assert data["check_in_done"] is True
+    assert data["check_out_done"] is False
 
 
 async def test_reject_window_closed(client, session):
@@ -270,6 +273,75 @@ async def test_aggregate_and_delta_batch(client, session):
     # student passed both phases → present; absent student → absent
     assert r.json()["present"] == 1
     assert r.json()["absent"] == 1
+
+
+async def test_aggregate_roster_exposes_phase_state(client, session):
+    """The aggregate `roster` exposes each student's raw 1차/2차 result
+    (check_in_done / check_out_done) + derived status, so the review table can
+    show the per-phase breakdown:
+      1차 only  -> check_in_done=True,  check_out_done=False
+      both     -> check_in_done=True,  check_out_done=True
+      neither  -> check_in_done=False, check_out_done=False
+    """
+    ctx = await _setup(client, session)
+    sid = ctx["session"].id
+    p_hdr = ctx["p_hdr"]
+    attended = ctx["student"]
+
+    # An enrolled student who never verifies (neither phase).
+    no_show = await seed_user(
+        session, f"n_{uuid.uuid4().hex[:6]}@wku.ac.kr", role="student"
+    )
+    await seed_enrollment(session, ctx["course"].id, no_show.id)
+
+    # 1차 (check_in) only — the attended student verifies once.
+    await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": sid,
+            "qr_token": ctx["tok"]["qr_token"],
+            "audio_nonce": ctx["tok"]["audio_nonce"],
+            "device_uuid": ctx["student_uuid"],
+        },
+        headers=ctx["s_hdr"],
+    )
+
+    roster = {
+        r["student_id"]: r
+        for r in (
+            await client.get(f"/sessions/{sid}/attendance", headers=p_hdr)
+        ).json()["roster"]
+    }
+    # attended: 1차 done, 2차 not yet.
+    assert roster[attended.id]["check_in_done"] is True
+    assert roster[attended.id]["check_out_done"] is False
+    # no-show: neither phase.
+    assert roster[no_show.id]["check_in_done"] is False
+    assert roster[no_show.id]["check_out_done"] is False
+    assert roster[no_show.id]["status"] == "pending"
+
+    # Open 2차 and have the attended student verify again → both phases done.
+    await client.post(f"/sessions/{sid}/checkout", json={"window_seconds": 60}, headers=p_hdr)
+    tok2 = (await client.get(f"/sessions/{sid}/token", headers=p_hdr)).json()
+    await client.post(
+        "/attendance/verify",
+        json={
+            "session_id": sid,
+            "qr_token": tok2["qr_token"],
+            "audio_nonce": tok2["audio_nonce"],
+            "device_uuid": ctx["student_uuid"],
+        },
+        headers=ctx["s_hdr"],
+    )
+
+    roster2 = {
+        r["student_id"]: r
+        for r in (
+            await client.get(f"/sessions/{sid}/attendance", headers=p_hdr)
+        ).json()["roster"]
+    }
+    assert roster2[attended.id]["check_in_done"] is True
+    assert roster2[attended.id]["check_out_done"] is True
 
 
 # --------------------------------------------------------------------------

@@ -1139,6 +1139,15 @@ components:
             week_number from (today - semester_start_date). Per-course so the
             next semester can differ. NULL means estimation is impossible and
             the professor picks the week manually.
+        schedules:
+          type: array
+          nullable: true
+          description: >-
+            Multi-day weekly slots (1:N). When present, CourseSchedule rows are
+            created for each entry and the scalar day_of_week/start_period/
+            end_period columns are mirrored from the earliest slot. Absent
+            (null) = use the scalar fields only.
+          items: { $ref: '#/components/schemas/CreateScheduleRequest' }
 
     UpdateCourseRequest:
       type: object
@@ -1168,6 +1177,15 @@ components:
           format: date
           nullable: true
           description: 학기 시작일 (1주차 월요일) for week auto-estimation.
+        schedules:
+          type: array
+          nullable: true
+          description: >-
+            Reconcile the course's weekly slots to EXACTLY this list when
+            present in the request body (an empty list clears all slots).
+            Absent (null) leaves existing slots untouched. The scalar columns
+            are re-mirrored from the earliest surviving slot.
+          items: { $ref: '#/components/schemas/CreateScheduleRequest' }
 
     Course:
       type: object
@@ -1185,6 +1203,10 @@ components:
         credits: { type: number, nullable: true }
         semester_start_date: { type: string, format: date, nullable: true }
         created_at: { type: string, format: date-time }
+        schedules:
+          type: array
+          description: All weekly slots (multi-day support), ordered by day then start_period.
+          items: { $ref: '#/components/schemas/ScheduleOut' }
 
     CourseCatalogItem:
       type: object
@@ -1202,6 +1224,10 @@ components:
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
         enrolled: { type: boolean, description: whether the calling student is enrolled }
+        schedules:
+          type: array
+          description: All weekly slots (multi-day support), ordered by day then start_period.
+          items: { $ref: '#/components/schemas/ScheduleOut' }
 
     MyCourseItem:
       type: object
@@ -1218,6 +1244,10 @@ components:
         end_period: { type: integer, nullable: true }
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
+        schedules:
+          type: array
+          description: All weekly slots (multi-day support), ordered by day then start_period.
+          items: { $ref: '#/components/schemas/ScheduleOut' }
 
     EnrollRequest:
       type: object
@@ -1264,6 +1294,13 @@ components:
             Attendance lifecycle phase. check_in = the start-of-class auth
             window is open; check_out = the end-of-class auth window is open
             (professor opened checkout); closed = session finalised.
+        checkout_opened:
+          type: boolean
+          description: >
+            True once the professor opened the 2차 (check_out) window at least
+            once. The UI uses this to show "2차 인증 열기" only when the second
+            phase hasn't happened yet (phase alone can't tell closed-after-1차
+            from closed-after-2차).
 
     SessionEstimateRequest:
       type: object
@@ -1293,6 +1330,21 @@ components:
           type: string
           nullable: true
           description: human-readable label for the matched slot (e.g. "월 1교시"), or null.
+        suggested_phase:
+          type: string
+          enum: [check_in, check_out]
+          default: check_in
+          description: >-
+            Which auth round to default the modal to. "check_out" when a closed
+            session for the estimated week+slot already has 1차 done but 2차 not
+            opened yet — the professor is re-opening for 2차.
+        pending_session_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            When suggested_phase is "check_out", the id of the existing session
+            to re-open (openCheckout). Null for a new 1차 session.
 
     SessionToken:
       type: object
@@ -1354,6 +1406,12 @@ components:
           enum: [check_in, check_out]
           nullable: true
           description: Which phase this verify counted towards (set on success, null on rejection).
+        check_in_done:
+          type: boolean
+          description: True when the student's 1차 (check_in) timestamp is set after this verify.
+        check_out_done:
+          type: boolean
+          description: True when the student's 2차 (check_out) timestamp is set after this verify.
         risk_warning:
           $ref: '#/components/schemas/RiskWarning'
           nullable: true
@@ -1518,8 +1576,12 @@ components:
         early_leave: { type: integer, description: Students resolved as early_leave (check_in only). Closed session only. }
         unverified:
           type: array
-          description: Students with no resolved status yet (still pending / no record), with readable display fields.
+          description: Students with no resolved status yet (still pending / no record), with readable display fields. Kept for backward compatibility; the `roster` field supersedes it for the review table.
           items: { $ref: '#/components/schemas/UnverifiedStudent' }
+        roster:
+          type: array
+          description: Full per-student roster with 1차/2차 phase state + derived status. Every enrolled student appears here (not just pending ones), so the professor review table can show each phase independently.
+          items: { $ref: '#/components/schemas/RosterStudent' }
 
     UnverifiedStudent:
       type: object
@@ -1533,6 +1595,23 @@ components:
         student_id: { type: string, description: Internal user id (UUID) — the Delta/batch key. }
         student_number: { type: string, nullable: true, description: School 학번. }
         name: { type: string, nullable: true, description: Display name. }
+
+    RosterStudent:
+      type: object
+      description: |
+        One enrolled student's per-phase verification state for a session. The
+        final `status` is derived from the two phase timestamps:
+        present (both), early_leave (check_in only), late (check_out only),
+        absent (neither, after close) / pending (before close). `check_in_done`
+        and `check_out_done` expose the raw 1차/2차 result so the review table
+        can render each phase independently of the derived status.
+      properties:
+        student_id: { type: string, description: Internal user id (UUID) — the Delta/batch key. }
+        student_number: { type: string, nullable: true, description: School 학번. }
+        name: { type: string, nullable: true, description: Display name. }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        check_in_done: { type: boolean, description: 1차 (check_in) timestamp present. }
+        check_out_done: { type: boolean, description: 2차 (check_out) timestamp present. }
 
     AttendanceMatrixStudent:
       type: object

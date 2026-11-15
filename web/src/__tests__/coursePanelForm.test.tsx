@@ -22,9 +22,7 @@ function makeForm(overrides: Partial<CourseForm> = {}): CourseForm {
     code: "",
     department: "",
     professor_name: "",
-    day_of_week: "",
-    start_period: "",
-    end_period: "",
+    slots: [],
     location: "",
     credits: "",
     semester_start_date: "",
@@ -32,28 +30,45 @@ function makeForm(overrides: Partial<CourseForm> = {}): CourseForm {
   };
 }
 
-describe("periodError — start must not exceed end", () => {
-  it("flags start > end with the Korean validation message", () => {
-    const err = periodError(makeForm({ start_period: "5", end_period: "3" }));
+// Helper: a complete slot (day + both periods).
+function slot(day: string, start: string, end: string) {
+  return { day_of_week: day, start_period: start, end_period: end };
+}
+
+describe("periodError — per-slot validation", () => {
+  it("flags start > end within a slot", () => {
+    const err = periodError(makeForm({ slots: [slot("2", "5", "3")] }));
     expect(err).toBe("시작 교시는 종료 교시보다 앞서야 합니다.");
   });
 
   it("accepts start < end", () => {
-    expect(periodError(makeForm({ start_period: "1", end_period: "3" }))).toBeNull();
+    expect(periodError(makeForm({ slots: [slot("2", "1", "3")] }))).toBeNull();
   });
 
   it("accepts start == end (single-period course)", () => {
-    expect(periodError(makeForm({ start_period: "2", end_period: "2" }))).toBeNull();
+    expect(periodError(makeForm({ slots: [slot("2", "2", "2")] }))).toBeNull();
   });
 
-  it("returns null when either period is blank (nothing to validate yet)", () => {
-    expect(periodError(makeForm({ start_period: "3", end_period: "" }))).toBeNull();
-    expect(periodError(makeForm({ start_period: "", end_period: "3" }))).toBeNull();
+  it("flags a partially filled slot (day but no periods)", () => {
+    expect(periodError(makeForm({ slots: [slot("2", "", "")] }))).toBe(
+      "요일·시작 교시·종료 교시를 모두 선택하세요.",
+    );
+  });
+
+  it("returns null when there are no slots", () => {
     expect(periodError(makeForm())).toBeNull();
+  });
+
+  it("skips fully-blank slots and validates the rest", () => {
+    expect(
+      periodError(
+        makeForm({ slots: [slot("", "", ""), slot("1", "2", "1")] }),
+      ),
+    ).toBe("시작 교시는 종료 교시보다 앞서야 합니다.");
   });
 });
 
-describe("formToPayload — blank strings become null, numbers are coerced", () => {
+describe("formToPayload — blank strings become null, schedules emitted", () => {
   it("maps every blank optional field to null and trims name", () => {
     const payload = formToPayload(makeForm({ name: "  소프트웨어공학  " }));
     expect(payload.name).toBe("소프트웨어공학");
@@ -65,24 +80,26 @@ describe("formToPayload — blank strings become null, numbers are coerced", () 
     expect(payload.end_period).toBeNull();
     expect(payload.location).toBeNull();
     expect(payload.credits).toBeNull();
+    // No complete slots → empty schedules array.
+    expect(payload.schedules).toEqual([]);
   });
 
   it("treats whitespace-only strings as null", () => {
-    const payload = formToPayload(makeForm({ name: "X", code: "   ", location: "\t" }));
+    const payload = formToPayload(
+      makeForm({ name: "X", code: "   ", location: "\t" }),
+    );
     expect(payload.code).toBeNull();
     expect(payload.location).toBeNull();
   });
 
-  it("coerces numeric/day fields and trims string fields", () => {
+  it("coerces a complete slot into a schedules entry + mirrored scalar", () => {
     const payload = formToPayload(
       makeForm({
         name: "자료구조",
         code: "  SW2001  ",
         department: "소프트웨어학과",
         professor_name: "김교수",
-        day_of_week: "3",
-        start_period: "4",
-        end_period: "6",
+        slots: [slot("3", "4", "6")],
         location: "공학관 302",
         credits: "3",
       }),
@@ -93,6 +110,32 @@ describe("formToPayload — blank strings become null, numbers are coerced", () 
     expect(payload.end_period).toBe(6);
     expect(payload.credits).toBe(3);
     expect(payload.professor_name).toBe("김교수");
+    expect(payload.schedules).toEqual([
+      { day_of_week: 3, start_period: 4, end_period: 6 },
+    ]);
+  });
+
+  it("emits multiple slots and mirrors the scalar from the first complete one", () => {
+    const payload = formToPayload(
+      makeForm({
+        name: "운영체제",
+        slots: [slot("1", "3", "4"), slot("0", "1", "2")],
+      }),
+    );
+    expect(payload.schedules).toHaveLength(2);
+    // First complete slot in row order is (화 3~4) → scalar mirrors it.
+    expect(payload.day_of_week).toBe(1);
+    expect(payload.start_period).toBe(3);
+    expect(payload.end_period).toBe(4);
+  });
+
+  it("drops incomplete slots from the schedules payload", () => {
+    const payload = formToPayload(
+      makeForm({ name: "X", slots: [slot("1", "3", "4"), slot("2", "", "")] }),
+    );
+    expect(payload.schedules).toEqual([
+      { day_of_week: 1, start_period: 3, end_period: 4 },
+    ]);
   });
 });
 
@@ -114,7 +157,6 @@ describe("useDebounced — value settles only after the delay", () => {
     rerender({ value: "b" });
     // still stale before the timer fires
     expect(result.current).toBe("a");
-
     act(() => {
       vi.advanceTimersByTime(199);
     });

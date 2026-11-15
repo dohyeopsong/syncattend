@@ -77,6 +77,7 @@ async def _to_out(db: AsyncSession, session: Session) -> SessionOut:
         window_open=is_open,
         window_remaining=remaining,
         phase=session.phase,
+        checkout_opened=session.checkout_opened,
     )
 
 
@@ -111,8 +112,36 @@ async def estimate_session_endpoint(
     week, schedule_id, label = await estimate_session(
         db, course=course, now=_now()
     )
+    # If a session already exists for this estimated week (+ slot when known)
+    # that finished 1차 (closed) but hasn't opened 2차 yet (checkout_opened
+    # False), default the modal to 2차 and hand back that session's id so the
+    # web can openCheckout on it instead of creating a brand-new session.
+    suggested_phase = "check_in"
+    pending_session_id: str | None = None
+    if week is not None:
+        query = (
+            select(Session)
+            .where(
+                Session.course_id == course.id,
+                Session.week_number == week,
+                Session.phase == "closed",
+                Session.checkout_opened.is_(False),
+            )
+            .order_by(Session.window_opened_at.desc())
+            .limit(1)
+        )
+        if schedule_id is not None:
+            query = query.where(Session.schedule_id == schedule_id)
+        existing = (await db.execute(query)).scalar_one_or_none()
+        if existing is not None:
+            suggested_phase = "check_out"
+            pending_session_id = existing.id
     return SessionEstimate(
-        week_number=week, schedule_id=schedule_id, schedule_label=label
+        week_number=week,
+        schedule_id=schedule_id,
+        schedule_label=label,
+        suggested_phase=suggested_phase,
+        pending_session_id=pending_session_id,
     )
 
 
@@ -194,15 +223,17 @@ async def open_checkout(
 ) -> SessionOut:
     """Open the check_out (end-of-class) auth window.
 
-    Transitions the session phase check_in → check_out and resets the active
-    window to a fresh length (body.window_seconds, or the default auth window).
-    Students then verify again against this end-of-class window.
+    Transitions the session phase → check_out and resets the active window to a
+    fresh length (body.window_seconds, or the default auth window). Students then
+    verify again against this end-of-class window.
+
+    Allowed from BOTH check_in and closed: the professor closes the 1차 window
+    (→ closed), reviews absentees, then re-opens the SAME session here for 2차.
+    The attendance rows are phase-aware, so the final status still derives from
+    the two timestamps (present=both, early_leave=check_in only,
+    late=check_out only, absent=neither) at batchClose.
     """
     session = await _load_owned_session(db, id, prof.id)
-    if session.phase == "closed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="session is closed"
-        )
     if session.phase == "check_out":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -214,6 +245,7 @@ async def open_checkout(
     )
     now = _now()
     session.phase = "check_out"
+    session.checkout_opened = True
     session.window_opened_at = now
     session.window_expires_at = now + timedelta(seconds=window)
     await db.commit()
@@ -241,6 +273,15 @@ async def get_session_token(
     db: AsyncSession = Depends(get_db),
 ) -> SessionToken:
     session = await _load_owned_session(db, id, prof.id)
+    # A closed session must NOT issue new tokens — the professor already ended
+    # the round. Without this guard, polling after close kept rotating the QR +
+    # audio nonce, so the student app could still "see" a live token for a
+    # session that was supposed to be over.
+    if session.phase == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="session is closed",
+        )
     is_open, remaining = _window_state(session)
     # Reuse the current token until near-expiry; only rotate when its TTL is
     # almost up. Polling this endpoint must NOT rotate every call (that made

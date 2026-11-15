@@ -14,12 +14,13 @@ import { useCoursesStore } from "@/store/courses";
 import { useAttendanceStore } from "@/store/attendance";
 import type { AttendanceStatus } from "@/api/types";
 
-// 주차별 출결 추이 선그래프 (15주 × 3 시리즈).
+// 주차별 출결 추이 선그래프 (현재 주차까지 × 3 시리즈).
 //
-// 가로=1~15주, 세로=인원 수. 출석(초록)/지각(노랑)/결석(빨강) 세 선으로
-// 시간 흐름에 따른 출결 변화를 보여준다. SVG로 직접 그려 차트 라이브러리
-// 의존성 없이 가볍게 렌더링. 마크 스펙: 2px 선, >=8px 마커, 호버 툴팁,
-// 범례는 항상 표시(3 시리즈).
+// 가로=1~현재 주차, 세로=인원 수. 출석(초록)/지각(노랑)/결석(빨강) 세 선으로
+// 시간 흐름에 따른 출결 변화를 보여준다. "현재 주차"는 데이터상 가장 최근
+// 출결 기록이 있는 주차로, 새 주차 데이터가 쌓이면 x축이 자동 확장된다.
+// SVG로 직접 그려 차트 라이브러리 의존성 없이 가볍게 렌더링. 마크 스펙:
+// 2px 선, >=8px 마커, 호버 툴팁, 범례는 항상 표시(3 시리즈).
 //
 // 데이터: lib/attendanceMatrix.ts 의 matrixToRows() 결과를 주차별로 집계.
 // 매트릭스는 GET /courses/{course_id}/attendance/matrix 응답을 파싱한 것으로,
@@ -40,7 +41,7 @@ const SERIES: Series[] = [
   { key: "absent", label: "결석", color: "oklch(0.577 0.245 27.325)", tone: "text-destructive" },
 ];
 
-// 매트릭스를 주차별 시리즈 카운트로 집계.
+// 매트릭스를 주차별 시리즈 카운트로 집계 (15주 전체).
 function buildWeeklyCounts(rows: StudentRow[]): Record<SeriesKey, number[]> {
   const counts: Record<SeriesKey, number[]> = {
     present: Array(WEEKS).fill(0),
@@ -57,6 +58,20 @@ function buildWeeklyCounts(rows: StudentRow[]): Record<SeriesKey, number[]> {
   return counts;
 }
 
+/**
+ * "현재 주차" = 데이터상 가장 최근에 출결 기록이 있는 주차. 아직 기록이 없으면 1.
+ * x축은 1~현재 주차까지만 그려지며, 새 주차 데이터가 쌓이면 자동으로 늘어난다.
+ */
+function currentWeekOf(rows: StudentRow[]): number {
+  let latest = 0;
+  for (const row of rows) {
+    for (let i = 0; i < row.weeks.length; i++) {
+      if (row.weeks[i] !== null) latest = Math.max(latest, i + 1);
+    }
+  }
+  return Math.max(1, latest);
+}
+
 // SVG 좌표계 (viewBox). 차트 본체 영역.
 const VB_W = 720;
 const VB_H = 280;
@@ -67,9 +82,10 @@ const PAD_B = 28;
 const PLOT_W = VB_W - PAD_L - PAD_R;
 const PLOT_H = VB_H - PAD_T - PAD_B;
 
-function xFor(weekIdx: number): number {
-  // 1주~15주를 플롯 영역에 균등 분할.
-  return PAD_L + (weekIdx / (WEEKS - 1)) * PLOT_W;
+function xFor(weekIdx: number, total: number): number {
+  // 1주~`total`주를 플롯 영역에 균등 분할. total이 1이면 중앙.
+  if (total <= 1) return PAD_L + PLOT_W / 2;
+  return PAD_L + (weekIdx / (total - 1)) * PLOT_W;
 }
 
 function yFor(value: number, max: number): number {
@@ -92,7 +108,15 @@ export function AbsenceRankChart() {
   const [hoverWeek, setHoverWeek] = useState<number | null>(null);
 
   const rows = matrix ?? [];
-  const counts = buildWeeklyCounts(rows);
+  const fullCounts = buildWeeklyCounts(rows);
+  // x축은 현재 주차(가장 최근 출결 기록이 있는 주차)까지만. 주차가 추가되면
+  // 그래프가 자동으로 오른쪽으로 확장된다.
+  const displayWeeks = Math.min(WEEKS, currentWeekOf(rows));
+  const counts: Record<SeriesKey, number[]> = {
+    present: fullCounts.present.slice(0, displayWeeks),
+    late: fullCounts.late.slice(0, displayWeeks),
+    absent: fullCounts.absent.slice(0, displayWeeks),
+  };
   const max = Math.max(
     1,
     ...SERIES.flatMap((s) => counts[s.key]),
@@ -108,7 +132,7 @@ export function AbsenceRankChart() {
   // 각 시리즈의 폴리라인 포인트.
   const paths = SERIES.map((s) => ({
     ...s,
-    points: counts[s.key].map((v, wi) => `${xFor(wi)},${yFor(v, yMax)}`).join(" "),
+    points: counts[s.key].map((v, wi) => `${xFor(wi, displayWeeks)},${yFor(v, yMax)}`).join(" "),
   }));
 
   return (
@@ -118,8 +142,9 @@ export function AbsenceRankChart() {
           <TrendingUp className="h-5 w-5" /> 주차별 출결 추이
         </CardTitle>
         <CardDescription>
-          15주 동안의 출석·지각·결석 인원 추이. 세 선이 벌어질수록 출결
-          양극화가 심한 주차입니다.
+          현재 주차({displayWeeks}주차)까지의 출석·지각·결석 인원 추이. 세 선이
+          벌어질수록 출결 양극화가 심한 주차입니다. 주차가 추가되면 그래프가
+          자동으로 확장됩니다.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -196,10 +221,10 @@ export function AbsenceRankChart() {
             ))}
 
             {/* X축 주차 라벨. */}
-            {Array.from({ length: WEEKS }, (_, i) => (
+            {Array.from({ length: displayWeeks }, (_, i) => (
               <text
                 key={i}
-                x={xFor(i)}
+                x={xFor(i, displayWeeks)}
                 y={VB_H - PAD_B + 14}
                 textAnchor="middle"
                 className="fill-muted-foreground"
@@ -221,8 +246,8 @@ export function AbsenceRankChart() {
             {/* Hover 세로 가이드. */}
             {hoverWeek !== null && (
               <line
-                x1={xFor(hoverWeek)}
-                x2={xFor(hoverWeek)}
+                x1={xFor(hoverWeek, displayWeeks)}
+                x2={xFor(hoverWeek, displayWeeks)}
                 y1={PAD_T}
                 y2={PAD_T + PLOT_H}
                 className="stroke-border"
@@ -249,7 +274,7 @@ export function AbsenceRankChart() {
               counts[p.key].map((v, wi) => (
                 <circle
                   key={`${p.key}-${wi}`}
-                  cx={xFor(wi)}
+                  cx={xFor(wi, displayWeeks)}
                   cy={yFor(v, yMax)}
                   r={4}
                   fill={p.color}
@@ -260,12 +285,13 @@ export function AbsenceRankChart() {
             )}
 
             {/* 투명한 넓은 hit 영역 — 마우스가 정확히 점에 안 닿아도 호버. */}
-            {Array.from({ length: WEEKS }, (_, i) => {
-              const halfStep = PLOT_W / (WEEKS - 1) / 2;
+            {Array.from({ length: displayWeeks }, (_, i) => {
+              const halfStep =
+                displayWeeks <= 1 ? PLOT_W / 2 : PLOT_W / (displayWeeks - 1) / 2;
               return (
                 <rect
                   key={i}
-                  x={xFor(i) - halfStep}
+                  x={xFor(i, displayWeeks) - halfStep}
                   y={PAD_T}
                   width={halfStep * 2}
                   height={PLOT_H}

@@ -180,6 +180,11 @@ class Session(Base):
     # `window_opened_at` / `window_expires_at` always describe the CURRENTLY
     # active window; opening checkout resets them to a fresh window.
     phase: Mapped[str] = mapped_column(String(16), nullable=False, default="check_in")
+    # True once the professor has opened the check_out (2차) window at least
+    # once for this session. Lets the UI distinguish "closed after 1차 only —
+    # 2차 can still be opened" from "closed after 2차 — session is final". The
+    # phase column alone cannot tell these apart (both read "closed").
+    checkout_opened: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     window_opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now
     )

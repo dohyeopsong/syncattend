@@ -200,6 +200,11 @@ function makeBackend() {
         late: 0,
         early_leave: 0,
         unverified: ["stu-2", "stu-3"],
+        roster: [
+          { student_id: "stu-1", student_number: "20240001", name: "학생1", status: "present", check_in_done: true, check_out_done: true },
+          { student_id: "stu-2", student_number: "20240002", name: "학생2", status: "pending", check_in_done: false, check_out_done: false },
+          { student_id: "stu-3", student_number: "20240003", name: "학생3", status: "pending", check_in_done: false, check_out_done: false },
+        ],
       },
     }),
     "PATCH /attendance/rec-1": (b) => ({
@@ -225,6 +230,7 @@ function makeBackend() {
           late: 0,
           early_leave: 0,
           unverified: [],
+          roster: [],
         },
       };
     },
@@ -322,15 +328,16 @@ describe("professor happy-path E2E (web client + stores)", () => {
     expect(useSessionStore.getState().token?.audio_nonce).toBe("1a2b3c4d");
     expect(useSessionStore.getState().token?.expires_in).toBe(15);
 
-    // 3) attendance aggregate (opt-out unverified list)
+    // 3) attendance aggregate (full roster + unverified list)
     await useAttendanceStore.getState().fetchAggregate("sess-1");
     const agg = useAttendanceStore.getState().aggregate!;
     expect(agg.total).toBe(3);
     expect(agg.present).toBe(1);
     expect(agg.unverified).toEqual(["stu-2", "stu-3"]);
-    // privacy: aggregate exposes only counts + student ids, no location fields
+    expect(agg.roster).toHaveLength(3);
+    // privacy: aggregate exposes only counts + student ids + roster, no location
     expect(Object.keys(agg).sort()).toEqual(
-      ["absent", "early_leave", "late", "present", "session_id", "total", "unverified"].sort(),
+      ["absent", "early_leave", "late", "present", "roster", "session_id", "total", "unverified"].sort(),
     );
 
     // 4) correct one record + queue delta + batch close

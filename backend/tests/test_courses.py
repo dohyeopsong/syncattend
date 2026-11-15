@@ -149,6 +149,81 @@ async def test_create_course_with_schedule_fields(client, session):
     assert c["professor_name"] == "홍길동"
 
 
+async def test_create_course_with_multiple_schedules(client, session):
+    """A multi-day course (월 1~2 + 화 3~4) created via `schedules` must return
+    both slots and mirror the scalar columns from the earliest slot."""
+    prof = await _prof(session)
+    hdr = auth_header(prof.id, "professor")
+    r = await client.post(
+        "/courses",
+        json={
+            "name": "운영체제",
+            "schedules": [
+                {"day_of_week": 1, "start_period": 3, "end_period": 4},
+                {"day_of_week": 0, "start_period": 1, "end_period": 2},
+            ],
+        },
+        headers=hdr,
+    )
+    assert r.status_code == 201, r.text
+    c = r.json()
+    slots = sorted(c["schedules"], key=lambda s: (s["day_of_week"], s["start_period"]))
+    assert len(slots) == 2
+    assert slots[0]["day_of_week"] == 0 and slots[0]["start_period"] == 1
+    assert slots[1]["day_of_week"] == 1 and slots[1]["start_period"] == 3
+    # Scalar mirrored from the earliest slot (월 1~2).
+    assert c["day_of_week"] == 0
+    assert c["start_period"] == 1 and c["end_period"] == 2
+
+    # The professor's list returns the same schedules array.
+    listed = await client.get("/courses", headers=hdr)
+    litem = next(x for x in listed.json() if x["id"] == c["id"])
+    assert len(litem["schedules"]) == 2
+
+
+async def test_update_course_reconciles_schedules(client, session):
+    """PATCH with `schedules` replaces the course's slots with exactly the
+    provided list (existing slots removed, scalar re-mirrored)."""
+    prof = await _prof(session)
+    hdr = auth_header(prof.id, "professor")
+    created = (
+        await client.post(
+            "/courses",
+            json={"name": "네트워크", "day_of_week": 0, "start_period": 1, "end_period": 1},
+            headers=hdr,
+        )
+    ).json()
+    assert len(created["schedules"]) == 1  # scalar mirrored into one slot
+
+    r = await client.patch(
+        f"/courses/{created['id']}",
+        json={
+            "schedules": [
+                {"day_of_week": 2, "start_period": 1, "end_period": 2},
+                {"day_of_week": 4, "start_period": 3, "end_period": 4},
+            ]
+        },
+        headers=hdr,
+    )
+    assert r.status_code == 200, r.text
+    c = r.json()
+    assert len(c["schedules"]) == 2
+    days = sorted(s["day_of_week"] for s in c["schedules"])
+    assert days == [2, 4]
+    # Scalar re-mirrored from the new earliest slot (수 1~2).
+    assert c["day_of_week"] == 2 and c["start_period"] == 1 and c["end_period"] == 2
+
+    # PATCH with an empty list clears all slots and nulls the scalar.
+    cleared = await client.patch(
+        f"/courses/{created['id']}", json={"schedules": []}, headers=hdr
+    )
+    assert cleared.status_code == 200, cleared.text
+    cc = cleared.json()
+    assert cc["schedules"] == []
+    assert cc["day_of_week"] is None
+
+
+
 async def test_create_course_name_only_defaults_null(client, session):
     prof = await _prof(session)
     hdr = auth_header(prof.id, "professor")
@@ -331,6 +406,40 @@ async def test_my_courses_returns_schedule(client, session):
     assert item["day_of_week"] == 2
     assert item["location"] == "공대 406"
     assert item["credits"] == 3.0
+
+
+async def test_catalog_backfills_day_period_from_schedules(client, session):
+    """A course whose scalar day/period columns are NULL (created without them
+    but with normalized course_schedules rows) must still surface its day/period
+    in the catalog — that is what the web "강좌 검색 → 자동 채우기" reads."""
+    from app.models import CourseSchedule
+
+    prof = await _prof(session)
+    stu = await _student(session)
+    phdr = auth_header(prof.id, "professor")
+    # Course created with NO day/period (scalar columns stay NULL).
+    course = (await client.post("/courses", json={"name": "알고리즘"}, headers=phdr)).json()
+    # But it has a normalized weekly slot: Wed 1~2교시.
+    session.add(
+        CourseSchedule(
+            course_id=course["id"], day_of_week=2, start_period=1, end_period=2
+        )
+    )
+    await session.commit()
+
+    shdr = auth_header(stu.id, "student")
+    r = await client.get("/courses/catalog", params={"q": "알고리즘"}, headers=shdr)
+    assert r.status_code == 200, r.text
+    item = next(c for c in r.json() if c["id"] == course["id"])
+    assert item["day_of_week"] == 2
+    assert item["start_period"] == 1 and item["end_period"] == 2
+
+    # The professor's own list must agree (no blank day there either).
+    listed = await client.get("/courses", headers=phdr)
+    assert listed.status_code == 200, listed.text
+    litem = next(c for c in listed.json() if c["id"] == course["id"])
+    assert litem["day_of_week"] == 2
+    assert litem["start_period"] == 1 and litem["end_period"] == 2
 
 
 # ------------------------------------------------ period rules + validation

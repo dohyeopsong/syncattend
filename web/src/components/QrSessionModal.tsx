@@ -27,7 +27,6 @@ export function QrSessionModal() {
   const openCheckout = useSessionStore((s) => s.openCheckout);
   const startTokenPolling = useSessionStore((s) => s.startTokenPolling);
   const stopTokenPolling = useSessionStore((s) => s.stopTokenPolling);
-  const openReview = useSessionStore((s) => s.openReview);
 
   // Course name for the QR context block — looked up from the courses store so
   // the student app can render "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)" at
@@ -98,16 +97,19 @@ export function QrSessionModal() {
     return () => clearInterval(id);
   }, [active]);
 
-  // 인증 창 남은 시간이 0s에 도달(자동 만료) → 결석자 검토 팝업 자동 오픈.
+  // 인증 창 남은 시간이 0s에 도달(자동 만료) → 세션을 닫고 결석자 검토 팝업을
+  // 연다. close()가 phase=closed로 만들어 QR/오디오 송출과 토큰 폴링이 즉시
+  // 멈춘다 (이전에는 openReview()만 호출해서 세션이 계속 active 상태로 QR이
+  // 돌아가고 토큰이 계속 갱신되는 문제가 있었다).
   // 세션 열기 직후 windowTick이 백엔드 값으로 동기화되기 전 잠시 0일 수 있으므로,
   // "카운트다운 중 0에 도달"(이전 > 0 → 현재 0)할 때만 트리거한다.
   const prevTickRef = useRef(windowTick);
   useEffect(() => {
     if (active && prevTickRef.current > 0 && windowTick <= 0) {
-      openReview();
+      void close();
     }
     prevTickRef.current = windowTick;
-  }, [active, windowTick, openReview]);
+  }, [active, windowTick, close]);
 
   // Token polling. The backend reuses a token for its full ~15s TTL and only
   // rotates near expiry. A 3s poll detects a rotation within ~3s and pushes
@@ -336,7 +338,7 @@ export function QrSessionModal() {
               톤 18.5kHz (5s)
             </Button>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
               className="flex-1"
@@ -345,13 +347,22 @@ export function QrSessionModal() {
               창 +60초 연장
             </Button>
             {phase === "check_in" ? (
-              <Button
-                variant="default"
-                className="flex-1"
-                onClick={() => void openCheckout(60)}
-              >
-                수업 종료 인증 열기
-              </Button>
+              <>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  onClick={() => void onClose()}
+                >
+                  인증 종료
+                </Button>
+                <Button
+                  variant="default"
+                  className="flex-1"
+                  onClick={() => void openCheckout(60)}
+                >
+                  수업 종료 인증 열기
+                </Button>
+              </>
             ) : (
               <Button
                 variant="destructive"

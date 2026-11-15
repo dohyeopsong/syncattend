@@ -25,9 +25,11 @@ import type {
   CourseScheduleSlot,
   CreateCourseRequest,
   DayOfWeek,
+  ScheduleSlotInput,
   UpdateCourseRequest,
 } from "@/api/types";
 import { estimateSession, listCourseSchedules } from "@/api/client";
+import { estimateLocally } from "@/lib/sessionEstimate";
 import { BookOpen, Pencil, Play, Plus, Search, Trash2, Users, X } from "lucide-react";
 
 // day_of_week: 0=Mon … 6=Sun (per contract).
@@ -69,13 +71,6 @@ function periodLabel(period: number): string {
   return `${period}교시 (${pad2(start)}:00~${pad2(start + 1)}:00)`;
 }
 
-// "09:00~12:00" spanning start..end periods (inclusive).
-function periodRangeTime(start: number, end: number): string {
-  const s = periodStartHour(start);
-  const e = periodStartHour(end) + 1;
-  return `${pad2(s)}:00~${pad2(e)}:00`;
-}
-
 // Small debounce hook — returns the value after it has been stable for `ms`.
 export function useDebounced<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -86,35 +81,69 @@ export function useDebounced<T>(value: T, ms: number): T {
   return debounced;
 }
 
-// Editable schedule fields shared by the add + edit forms (all strings for
-// controlled inputs; converted to typed payload on submit).
+// One editable weekly slot in the form (all strings for controlled inputs;
+// converted to typed payload on submit). A course can have several of these
+// (e.g. 월 1~2교시 + 화 3~4교시) — multi-day support.
+interface Slot {
+  day_of_week: string; // "" | "0".."6"
+  start_period: string; // "" | "1".."12"
+  end_period: string; // "" | "1".."12"
+}
+
+// Editable fields shared by the add + edit forms (all strings for controlled
+// inputs; converted to typed payload on submit).
 interface CourseForm {
   name: string;
   code: string;
   department: string;
   professor_name: string;
-  day_of_week: string; // "" | "1".."7"
-  start_period: string;
-  end_period: string;
+  slots: Slot[]; // weekly time slots (one per day the course meets)
   location: string;
   credits: string;
   semester_start_date: string; // ISO date (YYYY-MM-DD) or ""
 }
 
-export type { CourseForm };
+export type { CourseForm, Slot };
+
+const EMPTY_SLOT: Slot = { day_of_week: "", start_period: "", end_period: "" };
 
 const EMPTY_FORM: CourseForm = {
   name: "",
   code: "",
   department: "",
   professor_name: "",
-  day_of_week: "",
-  start_period: "",
-  end_period: "",
+  slots: [],
   location: "",
   credits: "",
   semester_start_date: "",
 };
+
+// Build form slots from a course's normalized schedules. Falls back to the
+// scalar columns (legacy / single-day course with no schedule rows).
+function slotsFromSchedules(
+  schedules: CourseScheduleSlot[] | undefined,
+  fallbackDay: DayOfWeek | null,
+  fallbackStart: number | null,
+  fallbackEnd: number | null,
+): Slot[] {
+  if (schedules && schedules.length > 0) {
+    return schedules.map((s) => ({
+      day_of_week: String(s.day_of_week),
+      start_period: String(s.start_period),
+      end_period: String(s.end_period),
+    }));
+  }
+  if (fallbackDay != null) {
+    return [
+      {
+        day_of_week: String(fallbackDay),
+        start_period: fallbackStart != null ? String(fallbackStart) : "",
+        end_period: fallbackEnd != null ? String(fallbackEnd) : "",
+      },
+    ];
+  }
+  return [];
+}
 
 function courseToForm(c: Course): CourseForm {
   return {
@@ -122,9 +151,12 @@ function courseToForm(c: Course): CourseForm {
     code: c.code ?? "",
     department: c.department ?? "",
     professor_name: c.professor_name ?? "",
-    day_of_week: c.day_of_week != null ? String(c.day_of_week) : "",
-    start_period: c.start_period != null ? String(c.start_period) : "",
-    end_period: c.end_period != null ? String(c.end_period) : "",
+    slots: slotsFromSchedules(
+      c.schedules,
+      c.day_of_week,
+      c.start_period,
+      c.end_period,
+    ),
     location: c.location ?? "",
     credits: c.credits != null ? String(c.credits) : "",
     semester_start_date: c.semester_start_date ?? "",
@@ -132,50 +164,77 @@ function courseToForm(c: Course): CourseForm {
 }
 
 // Empty string → null; numeric strings → number. Keeps optional fields sparse.
+// `schedules` is always emitted (possibly empty) so create reconciles to the
+// full slot set and PATCH clears slots when the professor removes all rows.
 export function formToPayload(f: CourseForm): CreateCourseRequest {
   const str = (v: string) => (v.trim() === "" ? null : v.trim());
   const num = (v: string) => (v.trim() === "" ? null : Number(v));
-  const day = f.day_of_week.trim() === "" ? null : (Number(f.day_of_week) as DayOfWeek);
+  const complete = f.slots.filter(
+    (s) => s.day_of_week !== "" && s.start_period !== "" && s.end_period !== "",
+  );
+  const schedules: ScheduleSlotInput[] = complete.map((s) => ({
+    day_of_week: Number(s.day_of_week) as DayOfWeek,
+    start_period: Number(s.start_period),
+    end_period: Number(s.end_period),
+  }));
+  // Mirror the scalar columns from the first complete slot (backward compat
+  // for consumers that still read day_of_week/start_period/end_period).
+  const first = complete[0];
   return {
     name: f.name.trim(),
     code: str(f.code),
     department: str(f.department),
     professor_name: str(f.professor_name),
-    day_of_week: day,
-    start_period: num(f.start_period),
-    end_period: num(f.end_period),
+    day_of_week: first ? (Number(first.day_of_week) as DayOfWeek) : null,
+    start_period: first ? Number(first.start_period) : null,
+    end_period: first ? Number(first.end_period) : null,
     location: str(f.location),
     credits: num(f.credits),
     semester_start_date: str(f.semester_start_date),
+    schedules,
   };
 }
 
-// Fill the add form from a selected catalog item (day/period stay editable).
+// Fill the add form from a selected catalog item (all weekly slots carried
+// over; the professor can edit/add/remove them before submitting).
 function catalogItemToForm(item: CourseCatalogItem): CourseForm {
   return {
     name: item.name ?? "",
     code: item.code ?? "",
     department: item.department ?? "",
     professor_name: item.professor_name ?? "",
-    day_of_week: item.day_of_week != null ? String(item.day_of_week) : "",
-    start_period: item.start_period != null ? String(item.start_period) : "",
-    end_period: item.end_period != null ? String(item.end_period) : "",
+    slots: slotsFromSchedules(
+      item.schedules,
+      item.day_of_week,
+      item.start_period,
+      item.end_period,
+    ),
     location: item.location ?? "",
     credits: item.credits != null ? String(item.credits) : "",
     semester_start_date: "",
   };
 }
 
-// Front-end validation: if both periods set, start must be <= end.
+// Front-end validation across all slots. A slot that has any field set must be
+// fully filled; start must be <= end.
 export function periodError(f: CourseForm): string | null {
-  const s = f.start_period.trim();
-  const e = f.end_period.trim();
-  if (s === "" || e === "") return null;
-  if (Number(s) > Number(e)) return "시작 교시는 종료 교시보다 앞서야 합니다.";
+  for (const s of f.slots) {
+    const hasAny = s.day_of_week !== "" || s.start_period !== "" || s.end_period !== "";
+    if (!hasAny) continue;
+    if (s.day_of_week === "" || s.start_period === "" || s.end_period === "") {
+      return "요일·시작 교시·종료 교시를 모두 선택하세요.";
+    }
+    if (Number(s.start_period) > Number(s.end_period)) {
+      return "시작 교시는 종료 교시보다 앞서야 합니다.";
+    }
+  }
   return null;
 }
 
 function scheduleLabel(c: Course): string {
+  if (c.schedules && c.schedules.length > 0) {
+    return c.schedules.map(slotLabel).join(", ") || "—";
+  }
   if (c.day_of_week == null && c.start_period == null) return "—";
   const day = c.day_of_week != null ? DAY_LABELS[c.day_of_week] : "";
   let periods = "";
@@ -197,6 +256,16 @@ function CourseFields({
   setForm: (f: CourseForm) => void;
 }) {
   const upd = (patch: Partial<CourseForm>) => setForm({ ...form, ...patch });
+
+  const updateSlot = (i: number, patch: Partial<Slot>) =>
+    setForm({
+      ...form,
+      slots: form.slots.map((s, idx) => (idx === i ? { ...s, ...patch } : s)),
+    });
+  const addSlot = () => setForm({ ...form, slots: [...form.slots, { ...EMPTY_SLOT }] });
+  const removeSlot = (i: number) =>
+    setForm({ ...form, slots: form.slots.filter((_, idx) => idx !== i) });
+
   return (
     <div className="grid grid-cols-2 gap-2">
       <div className="col-span-2 space-y-1">
@@ -240,68 +309,94 @@ function CourseFields({
           onChange={(e) => upd({ professor_name: e.target.value })}
         />
       </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          요일
-        </label>
-        <select
-          className="flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-soft"
-          value={form.day_of_week}
-          onChange={(e) => upd({ day_of_week: e.target.value })}
-        >
-          <option value="">미지정</option>
-          {DAY_OPTIONS.map((d) => (
-            <option key={d} value={d}>
-              {DAY_LABELS[d]}
-            </option>
-          ))}
-        </select>
+
+      {/* Weekly slots — one row per day the course meets. Each row pairs a
+          요일 with its own 시작/종료 교시 so multi-day courses (월 1~2 + 화 3~4)
+          can be expressed. Add/remove rows freely. */}
+      <div className="col-span-2 space-y-2">
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-medium text-muted-foreground">
+            요일 · 교시
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addSlot}
+            className="h-7"
+          >
+            <Plus className="h-3.5 w-3.5" /> 요일 추가
+          </Button>
+        </div>
+        {form.slots.length === 0 && (
+          <p className="rounded-lg border border-dashed border-border/70 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+            “요일 추가”를 눌러 수업 시간을 등록하세요. (여러 요일 추가 가능)
+          </p>
+        )}
+        {form.slots.map((slot, i) => (
+          <div key={i} className="flex items-end gap-1.5">
+            <div className="w-20 space-y-1">
+              <label className="text-[11px] text-muted-foreground">요일</label>
+              <select
+                className="flex h-10 w-full rounded-xl border border-input bg-card px-2 py-2 text-sm shadow-soft"
+                value={slot.day_of_week}
+                onChange={(e) => updateSlot(i, { day_of_week: e.target.value })}
+              >
+                <option value="">선택</option>
+                {DAY_OPTIONS.map((d) => (
+                  <option key={d} value={d}>
+                    {DAY_LABELS[d]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 space-y-1">
+              <label className="text-[11px] text-muted-foreground">시작 교시</label>
+              <select
+                className="flex h-10 w-full rounded-xl border border-input bg-card px-2 py-2 text-sm shadow-soft"
+                value={slot.start_period}
+                onChange={(e) => updateSlot(i, { start_period: e.target.value })}
+              >
+                <option value="">선택</option>
+                {PERIOD_OPTIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {periodLabel(p)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex-1 space-y-1">
+              <label className="text-[11px] text-muted-foreground">종료 교시</label>
+              <select
+                className="flex h-10 w-full rounded-xl border border-input bg-card px-2 py-2 text-sm shadow-soft"
+                value={slot.end_period}
+                onChange={(e) => updateSlot(i, { end_period: e.target.value })}
+              >
+                <option value="">선택</option>
+                {PERIOD_OPTIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {periodLabel(p)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
+              onClick={() => removeSlot(i)}
+              aria-label="요일 삭제"
+            >
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+        ))}
+        {periodError(form) && (
+          <p className="text-[11px] text-destructive">{periodError(form)}</p>
+        )}
       </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          시작 교시
-        </label>
-        <select
-          className="flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-soft"
-          value={form.start_period}
-          onChange={(e) => upd({ start_period: e.target.value })}
-        >
-          <option value="">미지정</option>
-          {PERIOD_OPTIONS.map((p) => (
-            <option key={p} value={p}>
-              {periodLabel(p)}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div className="space-y-1">
-        <label className="text-xs font-medium text-muted-foreground">
-          종료 교시
-        </label>
-        <select
-          className="flex h-10 w-full rounded-xl border border-input bg-card px-3 py-2 text-sm shadow-soft"
-          value={form.end_period}
-          onChange={(e) => upd({ end_period: e.target.value })}
-        >
-          <option value="">미지정</option>
-          {PERIOD_OPTIONS.map((p) => (
-            <option key={p} value={p}>
-              {periodLabel(p)}
-            </option>
-          ))}
-        </select>
-      </div>
-      {form.start_period && form.end_period && !periodError(form) && (
-        <p className="col-span-2 text-[11px] text-muted-foreground">
-          수업 시간:{" "}
-          {periodRangeTime(Number(form.start_period), Number(form.end_period))}
-        </p>
-      )}
-      {periodError(form) && (
-        <p className="col-span-2 text-[11px] text-destructive">
-          {periodError(form)}
-        </p>
-      )}
+
       <div className="space-y-1">
         <label className="text-xs font-medium text-muted-foreground">
           강의실
@@ -325,7 +420,7 @@ function CourseFields({
           onChange={(e) => upd({ credits: e.target.value })}
         />
       </div>
-      <div className="space-y-1">
+      <div className="col-span-2 space-y-1">
         <label className="text-xs font-medium text-muted-foreground">
           학기 시작일 (1주차 월요일)
         </label>
@@ -511,6 +606,7 @@ export function CoursePanel() {
 
   const session = useSessionStore((s) => s.session);
   const openSession = useSessionStore((s) => s.openSession);
+  const openCheckoutById = useSessionStore((s) => s.openCheckoutById);
   const resetSession = useSessionStore((s) => s.reset);
   const resetAttendance = useAttendanceStore((s) => s.reset);
 
@@ -534,6 +630,11 @@ export function CoursePanel() {
   const [chosenWeek, setChosenWeek] = useState<number | null>(null);
   const [chosenScheduleId, setChosenScheduleId] = useState<string | null>(null);
   const [estimateLabel, setEstimateLabel] = useState<string | null>(null);
+  // 1차(check_in) vs 2차(check_out) selection. Defaults to the server's
+  // suggestion: if a closed session for this week+slot already has 1차 done,
+  // the estimate returns suggested_phase="check_out" + pending_session_id.
+  const [chosenPhase, setChosenPhase] = useState<"check_in" | "check_out">("check_in");
+  const [pendingSessionId, setPendingSessionId] = useState<string | null>(null);
 
   // Whether the add form already matches an existing course (by code, fallback
   // name). Used to disable the submit button and warn on direct manual entry.
@@ -636,26 +737,42 @@ export function CoursePanel() {
     // resume() + the silent-prime buffer finish before the network round-trips
     // consume the gesture window.
     await unlockAudio();
-    // Fetch the estimated week + slot and the course's weekly slots, then ask
-    // the professor to confirm before creating the session. Estimation uses the
-    // current KST time + the course's semester_start_date + its schedule rows.
+    // Open-session confirmation: pre-fill week + slot from the CURRENT KST time
+    // + the course's semester_start_date + its schedule rows. The week/slot
+    // estimation runs LOCALLY in the browser (lib/sessionEstimate.ts) so the
+    // modal fills instantly without a network round-trip — the professor
+    // confirms/edits before the session is actually created.
     setEstimating(true);
     setConfirmOpen(true);
     setChosenWeek(null);
     setChosenScheduleId(null);
     setEstimateLabel(null);
+    setChosenPhase("check_in");
+    setPendingSessionId(null);
     try {
-      const [est, slots] = await Promise.all([
-        estimateSession(selected),
-        listCourseSchedules(selected),
-      ]);
+      const slots = await listCourseSchedules(selected);
       setSchedules(slots);
-      setChosenWeek(est.week_number);
-      setChosenScheduleId(est.schedule_id);
-      setEstimateLabel(est.schedule_label);
+      // Local time-based estimate — no backend dependency. Fills immediately.
+      const local = estimateLocally(
+        selectedCourse?.semester_start_date ?? null,
+        slots,
+      );
+      setChosenWeek(local.weekNumber);
+      setChosenScheduleId(local.scheduleId);
+      setEstimateLabel(local.scheduleLabel);
+      // 2차 auto-detection: ask the backend whether a closed session for this
+      // week+slot already has 1차 done (so we default to 2차). This is a DB
+      // lookup the browser can't do locally — but if it fails, the week/slot
+      // are already filled above and the professor can pick 1차/2차 manually.
+      try {
+        const est = await estimateSession(selected);
+        setChosenPhase(est.suggested_phase);
+        setPendingSessionId(est.pending_session_id);
+      } catch {
+        // Backend unavailable → default to 1차 (already set above).
+      }
     } catch {
-      // Estimation failed (network / no semester_start) — still let the
-      // professor pick manually from the schedules list.
+      // Schedule fetch failed — still let the professor pick manually.
       setSchedules([]);
     } finally {
       setEstimating(false);
@@ -666,11 +783,18 @@ export function CoursePanel() {
     if (!selected) return;
     setBusy(true);
     resetAttendance();
-    await openSession(selected, {
-      windowSeconds,
-      weekNumber: chosenWeek,
-      scheduleId: chosenScheduleId,
-    });
+    if (chosenPhase === "check_out" && pendingSessionId) {
+      // 2차: re-open the EXISTING closed session for check_out. The week/slot
+      // are already set on that session, so only the window length matters.
+      await openCheckoutById(pendingSessionId, windowSeconds);
+    } else {
+      // 1차: create a brand-new session with the chosen week + slot.
+      await openSession(selected, {
+        windowSeconds,
+        weekNumber: chosenWeek,
+        scheduleId: chosenScheduleId,
+      });
+    }
     setBusy(false);
     setConfirmOpen(false);
   }
@@ -880,15 +1004,7 @@ export function CoursePanel() {
                 {/* Autocomplete: pick from the catalog to auto-fill, then adjust
                     요일/교시. If no match, fill the fields below manually. */}
                 <CatalogSearch
-                  onSelect={(item) =>
-                    setAddForm((prev) => ({
-                      ...catalogItemToForm(item),
-                      // keep whatever the professor may have already set for day/period
-                      day_of_week: prev.day_of_week || (item.day_of_week != null ? String(item.day_of_week) : ""),
-                      start_period: prev.start_period || (item.start_period != null ? String(item.start_period) : ""),
-                      end_period: prev.end_period || (item.end_period != null ? String(item.end_period) : ""),
-                    }))
-                  }
+                  onSelect={(item) => setAddForm(catalogItemToForm(item))}
                 />
                 <p className="text-[11px] text-muted-foreground">
                   검색 결과가 없으면 아래에서 직접 입력하세요.
@@ -1001,12 +1117,62 @@ export function CoursePanel() {
                       </select>
                     </label>
                   </div>
+                  {/* 1차 / 2차 인증 선택. 추정 결과가 2차를 제안하면 자동으로
+                      2차가 선택된다 (해당 주차·슬롯에 1차가 끝난 세션이 있음).
+                      2차일 때는 pending_session_id로 기존 세션을 reopen. */}
+                  <div className="space-y-1.5">
+                    <span className="text-sm font-medium">인증 차수</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
+                          chosenPhase === "check_in"
+                            ? "border-primary bg-primary/10 font-medium text-primary"
+                            : "border-input bg-card text-muted-foreground hover:bg-accent"
+                        }`}
+                        onClick={() => setChosenPhase("check_in")}
+                      >
+                        1차 · 시작 인증
+                      </button>
+                      <button
+                        type="button"
+                        className={`rounded-xl border px-3 py-2 text-sm transition-colors ${
+                          chosenPhase === "check_out"
+                            ? "border-primary bg-primary/10 font-medium text-primary"
+                            : "border-input bg-card text-muted-foreground hover:bg-accent"
+                        }`}
+                        onClick={() => setChosenPhase("check_out")}
+                        disabled={!pendingSessionId}
+                        title={
+                          pendingSessionId
+                            ? "기존 세션의 2차(종료) 인증을 엽니다"
+                            : "1차 인증이 완료된 세션이 없어 2차를 열 수 없습니다"
+                        }
+                      >
+                        2차 · 종료 인증
+                      </button>
+                    </div>
+                    {chosenPhase === "check_out" && pendingSessionId && (
+                      <p className="text-xs text-muted-foreground">
+                        이 주차·교시에 1차 인증을 완료한 세션이 있습니다. 2차
+                        인증을 열면 해당 세션이 재오픈됩니다.
+                      </p>
+                    )}
+                  </div>
                   <Button
                     className="w-full"
                     onClick={() => void confirmOpenSession()}
-                    disabled={busy}
+                    disabled={
+                      busy ||
+                      (chosenPhase === "check_out" && !pendingSessionId)
+                    }
                   >
-                    <Play className="h-4 w-4" /> {busy ? "여는 중…" : "확정하고 세션 열기"}
+                    <Play className="h-4 w-4" />{" "}
+                    {busy
+                      ? "여는 중…"
+                      : chosenPhase === "check_out"
+                        ? "2차 인증 열기"
+                        : "확정하고 세션 열기"}
                   </Button>
                 </div>
               )}

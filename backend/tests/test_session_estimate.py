@@ -141,6 +141,72 @@ async def test_estimate_returns_week_and_slot(client, session):
     # The slot we added matches the current time, so it should be returned.
     assert body["schedule_id"] == slot.id
     assert body["schedule_label"] is not None
+    # No session yet → defaults to 1차 with no pending session.
+    assert body["suggested_phase"] == "check_in"
+    assert body["pending_session_id"] is None
+
+
+async def test_estimate_suggests_checkout_after_1차_closed(client, session):
+    """After a session for the estimated week+slot is closed (1차 done, 2차 not
+    opened), estimate should suggest check_out + return that session's id so the
+    modal can openCheckout on it instead of creating a new session."""
+    from datetime import date, timedelta
+
+    from app.models import CourseSchedule
+
+    prof = await seed_user(session, "p.co@wku.ac.kr", role="professor")
+    course = await seed_course(session, prof.id, "2차감지강의")
+    today = date.today()
+    course.semester_start_date = today - timedelta(days=70)
+    await session.commit()
+
+    now = datetime.now(KST)
+    cur_period = current_period(now)
+    if cur_period is None:
+        cur_period = 1
+    slot = CourseSchedule(
+        course_id=course.id,
+        day_of_week=now.weekday(),
+        start_period=cur_period,
+        end_period=cur_period,
+    )
+    session.add(slot)
+    await session.commit()
+    await session.refresh(slot)
+
+    hdr = auth_header(prof.id, "professor")
+    est = (
+        await client.post(
+            "/sessions/estimate", json={"course_id": course.id}, headers=hdr
+        )
+    ).json()
+    assert est["schedule_id"] == slot.id
+    assert est["suggested_phase"] == "check_in"
+
+    # Create + close a 1차 session for this week+slot.
+    created = await client.post(
+        "/sessions",
+        json={
+            "course_id": course.id,
+            "week_number": est["week_number"],
+            "schedule_id": slot.id,
+        },
+        headers=hdr,
+    )
+    assert created.status_code == 201
+    sid = created.json()["session_id"]
+    closed = await client.post(f"/sessions/{sid}/close", headers=hdr)
+    assert closed.status_code == 200
+    assert closed.json()["checkout_opened"] is False
+
+    # Re-estimate → should now suggest 2차 with the pending session id.
+    est2 = (
+        await client.post(
+            "/sessions/estimate", json={"course_id": course.id}, headers=hdr
+        )
+    ).json()
+    assert est2["suggested_phase"] == "check_out"
+    assert est2["pending_session_id"] == sid
 
 
 async def test_estimate_no_semester_start_returns_nulls(client, session):
