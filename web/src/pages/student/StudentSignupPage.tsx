@@ -211,7 +211,6 @@ export function StudentSignupPage() {
           <div className="flex gap-2">
             <Input
               type="text"
-              inputMode="email"
               autoComplete="email"
               placeholder="student@wku.ac.kr"
               value={email}
@@ -241,7 +240,7 @@ export function StudentSignupPage() {
                 className={`flex gap-2 ${codeError ? "animate-[shake_0.4s_ease-in-out]" : ""}`}
               >
                 <Input
-                  inputMode="numeric"
+                  type="text"
                   maxLength={6}
                   placeholder="인증번호 입력"
                   value={code}
@@ -278,7 +277,7 @@ export function StudentSignupPage() {
 
           <SectionLabel label="학번" />
           <Input
-            inputMode="numeric"
+            type="text"
             maxLength={32}
             placeholder="2026123456"
             value={studentId}
