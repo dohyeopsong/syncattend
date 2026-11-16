@@ -53,7 +53,8 @@ export function StudentLoginPage() {
               </label>
               <Input
                 id="email"
-                type="email"
+                type="text"
+                inputMode="email"
                 autoComplete="username"
                 placeholder="student@wku.ac.kr"
                 value={email}
