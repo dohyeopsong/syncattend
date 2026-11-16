@@ -14,13 +14,14 @@ Redis layout:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
+import smtplib
 from datetime import datetime, timezone
 from email.header import Header
 from email.mime.text import MIMEText
 
-import aiosmtplib
 from app.config import get_settings
 
 logger = logging.getLogger("syncattend.email")
@@ -45,60 +46,47 @@ def _generate_code(length: int) -> str:
     return f"{secrets.randbelow(10 ** length):0{length}d}"
 
 
+def _send_email_sync(to_email: str, code: str, subject: str, body: str) -> None:
+    """Synchronous SMTP send — runs in a worker thread via asyncio.to_thread.
+
+    Mirrors the verified working implementation: smtplib.SMTP on port 587 with
+    STARTTLS. Runs off the event loop so the async endpoint does not block.
+    """
+    settings = get_settings()
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = settings.smtp_user
+    msg["To"] = to_email
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(settings.smtp_user, settings.smtp_password)
+        # as_bytes() to preserve UTF-8 encoding (Korean subject/body).
+        server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
+
+
 async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
     """
     Deliver a verification code.
 
     If SMTP_USER / SMTP_PASSWORD are configured, send a real email via SMTP
-    (team member's implementation). Otherwise, log the code as a dev stub so
-    the flow remains testable without a mail provider.
-
-    Uses aiosmtplib (async) so the event loop is not blocked. Tries port 465
-    (implicit TLS) first, then falls back to 587 (STARTTLS) — some hosts (e.g.
-    Render) block one but not the other.
+    (port 587 + STARTTLS, run in a thread so the event loop is not blocked).
+    Otherwise, log the code as a dev stub so the flow remains testable without
+    a mail provider.
     """
     settings = get_settings()
     if not settings.smtp_user or not settings.smtp_password:
         logger.info("verification code for %s: %s (SMTP not configured)", email, code)
         return
 
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = settings.smtp_user
-    msg["To"] = email
-
-    # Try implicit-TLS (465) first, then STARTTLS (587). Render and some other
-    # PaaS hosts block one of the two; falling back maximizes the chance of
-    # delivery without extra config.
-    attempts = [
-        dict(port=465, start_tls=False, use_tls=True),
-        dict(port=587, start_tls=True, use_tls=False),
-    ]
-    last_err: Exception | None = None
-    for a in attempts:
-        try:
-            await aiosmtplib.send(
-                msg,
-                hostname=settings.smtp_host,
-                port=a["port"],
-                username=settings.smtp_user,
-                password=settings.smtp_password,
-                start_tls=a["start_tls"],
-                use_tls=a["use_tls"],
-                timeout=15,
-            )
-            logger.info(
-                "verification code email sent to %s (port %s)", email, a["port"]
-            )
-            return
-        except Exception as e:  # noqa: BLE001 — try next port, then surface
-            last_err = e
-            logger.warning(
-                "SMTP delivery failed for %s on port %s: %s", email, a["port"], e
-            )
-    # Both ports failed — surface the last error to the caller (HTTP 500).
-    logger.error("SMTP delivery failed for %s on all ports: %s", email, last_err)
-    raise last_err  # type: ignore[misc]
+    try:
+        await asyncio.to_thread(_send_email_sync, email, code, subject, body)
+        logger.info("verification code email sent to %s", email)
+    except Exception as e:  # noqa: BLE001 — surface any SMTP failure to caller
+        logger.error("SMTP delivery failed for %s: %s", email, e)
+        raise
 
 
 # ----------------------------------------------------------- signup flow
@@ -175,3 +163,4 @@ async def verify_reregister_code(redis, email: str, code: str) -> bool:
         await redis.delete(_reregister_code_key(email))  # single-use
         return True
     return False
+
