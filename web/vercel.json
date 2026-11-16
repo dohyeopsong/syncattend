@@ -3,10 +3,10 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "${RENDER_BACKEND_URL}/:path*"
+      "destination": "https://syncattend-6txb.onrender.com/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api).*)",
       "destination": "/index.html"
     }
   ]
