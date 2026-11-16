@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import logging
 import secrets
-import smtplib
 from datetime import datetime, timezone
 from email.header import Header
 from email.mime.text import MIMEText
 
+import aiosmtplib
 from app.config import get_settings
 
 logger = logging.getLogger("syncattend.email")
@@ -52,6 +52,10 @@ async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
     If SMTP_USER / SMTP_PASSWORD are configured, send a real email via SMTP
     (team member's implementation). Otherwise, log the code as a dev stub so
     the flow remains testable without a mail provider.
+
+    Uses aiosmtplib (async) so the event loop is not blocked. Tries port 465
+    (implicit TLS) first, then falls back to 587 (STARTTLS) — some hosts (e.g.
+    Render) block one but not the other.
     """
     settings = get_settings()
     if not settings.smtp_user or not settings.smtp_password:
@@ -63,16 +67,38 @@ async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
     msg["From"] = settings.smtp_user
     msg["To"] = email
 
-    try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(settings.smtp_user, settings.smtp_password)
-            server.sendmail(settings.smtp_user, email, msg.as_bytes())
-        logger.info("verification code email sent to %s", email)
-    except Exception as e:  # noqa: BLE001 — surface any SMTP failure to caller
-        logger.error("SMTP delivery failed for %s: %s", email, e)
-        raise
+    # Try implicit-TLS (465) first, then STARTTLS (587). Render and some other
+    # PaaS hosts block one of the two; falling back maximizes the chance of
+    # delivery without extra config.
+    attempts = [
+        dict(port=465, start_tls=False, use_tls=True),
+        dict(port=587, start_tls=True, use_tls=False),
+    ]
+    last_err: Exception | None = None
+    for a in attempts:
+        try:
+            await aiosmtplib.send(
+                msg,
+                hostname=settings.smtp_host,
+                port=a["port"],
+                username=settings.smtp_user,
+                password=settings.smtp_password,
+                start_tls=a["start_tls"],
+                use_tls=a["use_tls"],
+                timeout=15,
+            )
+            logger.info(
+                "verification code email sent to %s (port %s)", email, a["port"]
+            )
+            return
+        except Exception as e:  # noqa: BLE001 — try next port, then surface
+            last_err = e
+            logger.warning(
+                "SMTP delivery failed for %s on port %s: %s", email, a["port"], e
+            )
+    # Both ports failed — surface the last error to the caller (HTTP 500).
+    logger.error("SMTP delivery failed for %s on all ports: %s", email, last_err)
+    raise last_err  # type: ignore[misc]
 
 
 # ----------------------------------------------------------- signup flow
