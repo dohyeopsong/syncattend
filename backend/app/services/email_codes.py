@@ -49,24 +49,54 @@ def _generate_code(length: int) -> str:
 def _send_email_sync(to_email: str, code: str, subject: str, body: str) -> None:
     """Synchronous SMTP send — runs in a worker thread via asyncio.to_thread.
 
-    Uses SMTP_SSL (implicit TLS, port 465) with the hostname passed through so
-    SNI works. Runs off the event loop so the async endpoint does not block.
-
-    Why SSL/465 instead of STARTTLS/587: Render's free tier defaults to IPv6
-    for outbound and 587/STARTTLS connections fail with "[Errno 101] Network
-    is unreachable". Port 465 with a hostname keeps the SSL SNI intact while
-    letting the runtime pick a working route.
+    Forces an IPv4 (AF_INET) socket and wraps it in TLS manually. Render's
+    free tier routes outbound over IPv6 by default and Gmail SMTP is
+    unreachable there ("[Errno 101] Network is unreachable"). By resolving
+    the host to an A record and connecting an IPv4 socket ourselves, then
+    wrapping it with SSLContext (server_hostname set for SNI), we bypass the
+    IPv6 route entirely while keeping TLS hostname verification intact.
     """
+    import socket
+    import ssl
+
     settings = get_settings()
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = Header(subject, "utf-8")
     msg["From"] = settings.smtp_user
     msg["To"] = to_email
 
-    with smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=20) as server:
+    host = settings.smtp_host
+    port = 465
+
+    # Resolve to an IPv4 address only — drop any AAAA records.
+    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    if not infos:
+        raise OSError(f"no IPv4 address found for {host}")
+    family, socktype, proto, _, sockaddr = infos[0]
+
+    raw = socket.socket(family, socktype, proto)
+    raw.settimeout(20)
+    raw.connect(sockaddr)
+
+    # Wrap the connected IPv4 socket in TLS, keeping the hostname for SNI +
+    # certificate verification. This is what SMTP_SSL does internally, but
+    # we control the underlying socket to guarantee IPv4.
+    ctx = ssl.create_default_context()
+    tls = ctx.wrap_socket(raw, server_hostname=host)
+
+    try:
+        server = smtplib.SMTP_SSL(timeout=20)  # no auto-connect
+        server.sock = tls
+        server.file = server.sock.makefile("rb")
+        server.host = host
+        # Consume the server greeting.
+        server.getreply()
         server.login(settings.smtp_user, settings.smtp_password)
         # as_bytes() to preserve UTF-8 encoding (Korean subject/body).
         server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
+        server.quit()
+    finally:
+        tls.close()
 
 
 async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
