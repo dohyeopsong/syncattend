@@ -17,7 +17,14 @@ class Settings(BaseSettings):
 
     # CORS: comma-separated list of allowed web origins. In dev only the Vite
     # server (:5173) is allowed; on Render set CORS_ORIGINS to the Vercel URL(s).
-    cors_origins: list[str] = ["http://localhost:5173"]
+    # Stored as a plain string and split on commas (pydantic-settings would
+    # otherwise try to JSON-parse a list-typed env var, which breaks on a bare URL).
+    cors_origins: str = "http://localhost:5173"
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def allowed_origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     # Auth / identity-defense parameters (contract-aligned)
     jwt_secret: str = "dev-only-change-me"
