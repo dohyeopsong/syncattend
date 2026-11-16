@@ -135,7 +135,9 @@ export function DeviceReauthScreen() {
           <div className="space-y-2">
             <label className="text-sm font-medium">학교 이메일 (@wku.ac.kr)</label>
             <Input
-              type="email"
+              type="text"
+              inputMode="email"
+              autoComplete="email"
               placeholder="student@wku.ac.kr"
               value={emailInput}
               onChange={(e) => setEmailInput(e.target.value)}

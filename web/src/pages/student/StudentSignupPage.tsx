@@ -210,7 +210,9 @@ export function StudentSignupPage() {
           </p>
           <div className="flex gap-2">
             <Input
-              type="email"
+              type="text"
+              inputMode="email"
+              autoComplete="email"
               placeholder="student@wku.ac.kr"
               value={email}
               onChange={(e) => {
