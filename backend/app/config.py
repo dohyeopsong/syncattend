@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     smtp_password: str | None = None
     smtp_from_name: str = "Syncattend"
 
+    # Resend (https://resend.com) — HTTP email API. Used INSTEAD of SMTP on
+    # hosts that block outbound SMTP (e.g. Render free tier: "Network is
+    # unreachable" on ports 465/587). When RESEND_API_KEY is set, _deliver()
+    # routes through Resend's HTTPS endpoint; otherwise falls back to SMTP /
+    # the dev stub. The "from" address must be a verified sender in Resend.
+    resend_api_key: str | None = None
+    resend_from: str = "onboarding@resend.dev"
+
     # Risk-group thresholds (SSE warning) — externalized boundaries.
     # danger  when absences >= risk_absence_threshold
     # warning when absences >= risk_warning_threshold (and < danger)

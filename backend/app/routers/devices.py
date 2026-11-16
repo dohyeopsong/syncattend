@@ -9,6 +9,7 @@ go through email re-auth (/devices/reregister/*).
 """
 from __future__ import annotations
 
+import logging
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -29,6 +30,8 @@ from app.schemas import (
 from app.services.email_codes import issue_reregister_code, verify_reregister_code
 
 router = APIRouter(prefix="/devices", tags=["devices"])
+
+logger = logging.getLogger("syncattend.devices")
 
 
 async def _active_binding(db: AsyncSession, user_id: str) -> Device | None:
@@ -54,9 +57,13 @@ async def register_device(
                 bound_at=existing.bound_at,
             )
         # Conflict: account already bound to a different UUID → email re-auth required.
+        logger.info(
+            "device register 409: user=%s incoming_uuid=%s bound_uuid=%s",
+            user.id, body.device_uuid, existing.device_uuid,
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="등록된 계정과 일치하지 않습니다. 기기 재등록이 필요합니다. (/devices/reregister/*)",
+            detail=f"등록된 계정과 일치하지 않습니다. 기기 재등록이 필요합니다. (incoming: {body.device_uuid})",
         )
 
     # UUID must be globally unique (one device per account). When the UUID is

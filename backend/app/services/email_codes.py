@@ -1,10 +1,10 @@
 """
 Email verification codes for signup + device re-registration.
 
-Codes are stored in Redis with a short TTL. When SMTP credentials are
-configured (SMTP_USER / SMTP_PASSWORD), codes are delivered via real email;
-otherwise they are logged as a dev stub (so the flow is testable without a
-mail provider). A production build simply sets the SMTP env vars.
+Codes are stored in Redis with a short TTL. When RESEND_API_KEY is configured,
+codes are delivered via the Resend HTTP email API (no SMTP port needed — works
+on hosts like Render that block outbound SMTP). Otherwise, when SMTP_USER /
+SMTP_PASSWORD are set, falls back to SMTP; with neither, logs as a dev stub.
 
 Team member's original signup flow: send-code → verify-code → register.
 Redis layout:
@@ -14,13 +14,10 @@ Redis layout:
 """
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
 import secrets
-import smtplib
-from datetime import datetime, timezone
-from email.header import Header
-from email.mime.text import MIMEText
+import urllib.request
 
 from app.config import get_settings
 
@@ -46,79 +43,94 @@ def _generate_code(length: int) -> str:
     return f"{secrets.randbelow(10 ** length):0{length}d}"
 
 
-def _send_email_sync(to_email: str, code: str, subject: str, body: str) -> None:
-    """Synchronous SMTP send — runs in a worker thread via asyncio.to_thread.
+def _send_via_resend(to_email: str, subject: str, body: str) -> None:
+    """Send an email via the Resend HTTP API.
 
-    Forces an IPv4 (AF_INET) socket and wraps it in TLS manually. Render's
-    free tier routes outbound over IPv6 by default and Gmail SMTP is
-    unreachable there ("[Errno 101] Network is unreachable"). By resolving
-    the host to an A record and connecting an IPv4 socket ourselves, then
-    wrapping it with SSLContext (server_hostname set for SNI), we bypass the
-    IPv6 route entirely while keeping TLS hostname verification intact.
+    Uses urllib (stdlib) so no extra dependency is needed. Runs in a worker
+    thread via asyncio.to_thread so the event loop is not blocked. Resend
+    accepts HTTPS on port 443, which Render (and most PaaS hosts) allow even
+    when outbound SMTP (465/587) is blocked.
     """
-    import socket
-    import ssl
-
     settings = get_settings()
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = settings.smtp_user
-    msg["To"] = to_email
+    payload = json.dumps(
+        {
+            "from": settings.resend_from,
+            "to": [to_email],
+            "subject": subject,
+            "text": body,
+        }
+    ).encode("utf-8")
 
-    host = settings.smtp_host
-    port = 465
-
-    # Resolve to an IPv4 address only — drop any AAAA records.
-    infos = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
-    if not infos:
-        raise OSError(f"no IPv4 address found for {host}")
-    family, socktype, proto, _, sockaddr = infos[0]
-
-    raw = socket.socket(family, socktype, proto)
-    raw.settimeout(20)
-    raw.connect(sockaddr)
-
-    # Wrap the connected IPv4 socket in TLS, keeping the hostname for SNI +
-    # certificate verification. This is what SMTP_SSL does internally, but
-    # we control the underlying socket to guarantee IPv4.
-    ctx = ssl.create_default_context()
-    tls = ctx.wrap_socket(raw, server_hostname=host)
-
-    try:
-        server = smtplib.SMTP_SSL(timeout=20)  # no auto-connect
-        server.sock = tls
-        server.file = server.sock.makefile("rb")
-        server.host = host
-        # Consume the server greeting.
-        server.getreply()
-        server.login(settings.smtp_user, settings.smtp_password)
-        # as_bytes() to preserve UTF-8 encoding (Korean subject/body).
-        server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
-        server.quit()
-    finally:
-        tls.close()
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {settings.resend_api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        # Resend returns 200 on success; any error raises HTTPError (caught
+        # by the caller). Read the body so the connection can be reused.
+        resp.read()
 
 
 async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
     """
     Deliver a verification code.
 
-    If SMTP_USER / SMTP_PASSWORD are configured, send a real email via SMTP
-    (port 587 + STARTTLS, run in a thread so the event loop is not blocked).
-    Otherwise, log the code as a dev stub so the flow remains testable without
-    a mail provider.
+    Priority:
+      1. RESEND_API_KEY set → Resend HTTP API (recommended for Render/etc).
+      2. SMTP_USER / SMTP_PASSWORD set → SMTP (local dev / hosts that allow it).
+      3. Neither → log the code as a dev stub (testable without a provider).
     """
-    settings = get_settings()
-    if not settings.smtp_user or not settings.smtp_password:
-        logger.info("verification code for %s: %s (SMTP not configured)", email, code)
-        return
+    import asyncio
 
-    try:
-        await asyncio.to_thread(_send_email_sync, email, code, subject, body)
-        logger.info("verification code email sent to %s", email)
-    except Exception as e:  # noqa: BLE001 — surface any SMTP failure to caller
-        logger.error("SMTP delivery failed for %s: %s", email, e)
-        raise
+    settings = get_settings()
+
+    # 1. Resend (preferred for hosts that block SMTP).
+    if settings.resend_api_key:
+        try:
+            await asyncio.to_thread(_send_via_resend, email, subject, body)
+            logger.info("verification code email sent to %s (via Resend)", email)
+            return
+        except Exception as e:
+            logger.error("Resend delivery failed for %s: %s", email, e)
+            raise
+
+    # 2. SMTP fallback.
+    if settings.smtp_user and settings.smtp_password:
+        try:
+            await asyncio.to_thread(_send_via_smtp, email, subject, body)
+            logger.info("verification code email sent to %s (via SMTP)", email)
+            return
+        except Exception as e:
+            logger.error("SMTP delivery failed for %s: %s", email, e)
+            raise
+
+    # 3. Dev stub.
+    logger.info("verification code for %s: %s (no mail provider configured)", email, code)
+
+
+def _send_via_smtp(to_email: str, subject: str, body: str) -> None:
+    """SMTP fallback — synchronous, run in a worker thread."""
+    import smtplib
+    from email.header import Header
+    from email.mime.text import MIMEText
+
+    settings = get_settings()
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = settings.smtp_user or ""
+    msg["To"] = to_email
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(settings.smtp_user, settings.smtp_password)
+        server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
 
 
 # ----------------------------------------------------------- signup flow
