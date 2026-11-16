@@ -136,7 +136,6 @@ export function DeviceReauthScreen() {
             <label className="text-sm font-medium">학교 이메일 (@wku.ac.kr)</label>
             <Input
               type="text"
-              inputMode="email"
               autoComplete="email"
               placeholder="student@wku.ac.kr"
               value={emailInput}
@@ -149,7 +148,7 @@ export function DeviceReauthScreen() {
             <div className="space-y-2">
               <label className="text-sm font-medium">인증 코드</label>
               <Input
-                inputMode="numeric"
+                type="text"
                 placeholder="인증번호"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}

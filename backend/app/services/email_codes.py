@@ -14,6 +14,7 @@ Redis layout:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import smtplib
@@ -45,30 +46,43 @@ def _generate_code(length: int) -> str:
     return f"{secrets.randbelow(10 ** length):0{length}d}"
 
 
+def _send_email_sync(to_email: str, code: str, subject: str, body: str) -> None:
+    """Synchronous SMTP send — runs in a worker thread via asyncio.to_thread.
+
+    Mirrors the verified working implementation: smtplib.SMTP on port 587 with
+    STARTTLS. Runs off the event loop so the async endpoint does not block.
+    """
+    settings = get_settings()
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = Header(subject, "utf-8")
+    msg["From"] = settings.smtp_user
+    msg["To"] = to_email
+
+    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(settings.smtp_user, settings.smtp_password)
+        # as_bytes() to preserve UTF-8 encoding (Korean subject/body).
+        server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
+
+
 async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
     """
     Deliver a verification code.
 
     If SMTP_USER / SMTP_PASSWORD are configured, send a real email via SMTP
-    (team member's implementation). Otherwise, log the code as a dev stub so
-    the flow remains testable without a mail provider.
+    (port 587 + STARTTLS, run in a thread so the event loop is not blocked).
+    Otherwise, log the code as a dev stub so the flow remains testable without
+    a mail provider.
     """
     settings = get_settings()
     if not settings.smtp_user or not settings.smtp_password:
         logger.info("verification code for %s: %s (SMTP not configured)", email, code)
         return
 
-    msg = MIMEText(body, "plain", "utf-8")
-    msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = settings.smtp_user
-    msg["To"] = email
-
     try:
-        with smtplib.SMTP(settings.smtp_host, settings.smtp_port) as server:
-            server.ehlo()
-            server.starttls()
-            server.login(settings.smtp_user, settings.smtp_password)
-            server.sendmail(settings.smtp_user, email, msg.as_bytes())
+        await asyncio.to_thread(_send_email_sync, email, code, subject, body)
         logger.info("verification code email sent to %s", email)
     except Exception as e:  # noqa: BLE001 — surface any SMTP failure to caller
         logger.error("SMTP delivery failed for %s: %s", email, e)
@@ -149,3 +163,4 @@ async def verify_reregister_code(redis, email: str, code: str) -> bool:
         await redis.delete(_reregister_code_key(email))  # single-use
         return True
     return False
+

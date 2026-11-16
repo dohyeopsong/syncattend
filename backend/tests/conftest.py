@@ -19,6 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import os
 
 os.environ["REDIS_URL"] = "fakeredis://"
+# Tests must never hit a real SMTP server: force the credentials empty so the
+# email_codes _deliver() stub logs the code instead of sending it. An empty
+# string overrides the developer's .env (env vars rank above the env file).
+os.environ["SMTP_USER"] = ""
+os.environ["SMTP_PASSWORD"] = ""
+
+from app.config import get_settings as _get_settings  # noqa: E402
+
+# The lru_cache on get_settings() may already hold a Settings instance built
+# from the developer's .env (with real SMTP creds). Clear it so the env vars
+# above take effect before any test imports the settings.
+_get_settings.cache_clear()
 
 from app import db as app_db  # noqa: E402
 from app import redis_client as app_redis  # noqa: E402
