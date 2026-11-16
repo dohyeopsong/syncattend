@@ -49,8 +49,13 @@ def _generate_code(length: int) -> str:
 def _send_email_sync(to_email: str, code: str, subject: str, body: str) -> None:
     """Synchronous SMTP send — runs in a worker thread via asyncio.to_thread.
 
-    Mirrors the verified working implementation: smtplib.SMTP on port 587 with
-    STARTTLS. Runs off the event loop so the async endpoint does not block.
+    Uses SMTP_SSL (implicit TLS, port 465) with the hostname passed through so
+    SNI works. Runs off the event loop so the async endpoint does not block.
+
+    Why SSL/465 instead of STARTTLS/587: Render's free tier defaults to IPv6
+    for outbound and 587/STARTTLS connections fail with "[Errno 101] Network
+    is unreachable". Port 465 with a hostname keeps the SSL SNI intact while
+    letting the runtime pick a working route.
     """
     settings = get_settings()
     msg = MIMEText(body, "plain", "utf-8")
@@ -58,10 +63,7 @@ def _send_email_sync(to_email: str, code: str, subject: str, body: str) -> None:
     msg["From"] = settings.smtp_user
     msg["To"] = to_email
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
+    with smtplib.SMTP_SSL(settings.smtp_host, 465, timeout=20) as server:
         server.login(settings.smtp_user, settings.smtp_password)
         # as_bytes() to preserve UTF-8 encoding (Korean subject/body).
         server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
