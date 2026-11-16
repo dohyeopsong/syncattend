@@ -14,7 +14,11 @@ import type {
   Enrollment,
   LoginRequest,
   MyAttendanceItem,
+  MyCourseItem,
   RefreshRequest,
+  RegisterUserRequest,
+  RiskWarning,
+  SendCodeRequest,
   Session,
   SessionEstimate,
   SessionToken,
@@ -25,6 +29,8 @@ import type {
   TokenPair,
   UpdateCourseRequest,
   UserOut,
+  VerifyCodeRequest,
+  VerifyCodeResult,
   VerifyRequest,
   VerifyResult,
   DeviceBinding,
@@ -420,4 +426,118 @@ export function verifyAttendance(
 
 export function getMyAttendance(): Promise<MyAttendanceItem[]> {
   return request<MyAttendanceItem[]>("/me/attendance");
+}
+
+// ------------------------------------------------------ student auth (web)
+// Signup flow (send-code → verify-code → register) + device re-registration.
+// Mirrors the Flutter app's auth_controller.dart; transported over the browser.
+export function sendSignupCode(payload: SendCodeRequest): Promise<VerifyCodeResult> {
+  return request<VerifyCodeResult>("/auth/send-code", {
+    method: "POST",
+    headers: { "X-Client-Type": "student-web" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function verifySignupCode(
+  payload: VerifyCodeRequest,
+): Promise<VerifyCodeResult> {
+  return request<VerifyCodeResult>("/auth/verify-code", {
+    method: "POST",
+    headers: { "X-Client-Type": "student-web" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function registerUser(
+  payload: RegisterUserRequest,
+): Promise<UserOut> {
+  return request<UserOut>("/auth/register", {
+    method: "POST",
+    headers: { "X-Client-Type": "student-web" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// Device binding status (GET /devices/me). 404 = no binding yet, 401 = no/invalid
+// token. Used by the student home bootstrap to decide register vs reauth vs ready.
+export function getMyDevice(): Promise<DeviceBinding> {
+  return request<DeviceBinding>("/devices/me");
+}
+
+// Request a re-auth verification code to the given @wku.ac.kr email.
+export function requestReauthCode(email: string): Promise<void> {
+  return request<void>("/devices/reregister/request", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+// Confirm the re-auth code and rebind this device's UUID to the email account.
+export function confirmReauth(
+  email: string,
+  code: string,
+  newDeviceUuid: string,
+): Promise<DeviceBinding> {
+  return request<DeviceBinding>("/devices/reregister/confirm", {
+    method: "POST",
+    body: JSON.stringify({
+      email,
+      code,
+      new_device_uuid: newDeviceUuid,
+    }),
+  });
+}
+
+// Courses the calling student is enrolled in — the timetable source.
+export function listMyCourses(): Promise<MyCourseItem[]> {
+  return request<MyCourseItem[]>("/me/courses");
+}
+
+// Student self-enroll / unenroll (the catalog's "담기" / "취소" buttons).
+export function enrollSelf(courseId: string): Promise<Enrollment> {
+  return request<Enrollment>(
+    `/courses/${encodeURIComponent(courseId)}/enroll-self`,
+    { method: "POST" },
+  );
+}
+
+export function unenrollSelf(courseId: string): Promise<void> {
+  return request<void>(
+    `/courses/${encodeURIComponent(courseId)}/enroll-self`,
+    { method: "DELETE" },
+  );
+}
+
+// SSE risk-warning stream URL for the calling student. EventSource cannot set
+// Authorization headers, so the access token is passed as a query param.
+export function sseStudentUrl(studentId: string): string {
+  const q = accessToken
+    ? `?access_token=${encodeURIComponent(accessToken)}`
+    : "";
+  return `${BASE}/sse/students/${encodeURIComponent(studentId)}${q}`;
+}
+
+// Parse a single SSE `data:` frame into a RiskWarning, or null if the frame is
+// a comment / keep-alive / malformed JSON. Shared by the risk banner hook.
+export function parseRiskFrame(data: string): RiskWarning | null {
+  const trimmed = data.trim();
+  if (!trimmed) return null;
+  try {
+    const obj = JSON.parse(trimmed) as Partial<RiskWarning>;
+    if (
+      obj.level &&
+      obj.message != null &&
+      typeof obj.absences === "number"
+    ) {
+      return {
+        level: obj.level,
+        absences: obj.absences,
+        message: obj.message,
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
