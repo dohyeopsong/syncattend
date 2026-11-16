@@ -66,6 +66,26 @@ String verifyReasonGuidance(VerifyReason r) {
   }
 }
 
+/// One-line session context derived from the QR context block, e.g.
+/// "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)". Pure + top-level so the
+/// formatting (segment order, phase label, empty-field skipping) is unit-tested
+/// independently of the widget tree. Returns null when no context is available.
+String? sessionContextLine(AttendanceState s) {
+  if (!s.hasContext) return null;
+  final segments = <String>[];
+  if (s.courseName != null && s.courseName!.isNotEmpty) {
+    segments.add(s.courseName!);
+  }
+  if (s.scheduleLabel != null && s.scheduleLabel!.isNotEmpty) {
+    segments.add(s.scheduleLabel!);
+  }
+  if (s.weekNumber != null) segments.add('${s.weekNumber}주차');
+  // Phase label is always shown when any context exists, so the student always
+  // knows which round (1/2 시작 vs 2/2 종료) they are authenticating against.
+  segments.add(s.isCheckoutPhase ? '종료 인증 (2/2)' : '시작 인증 (1/2)');
+  return segments.join(' · ');
+}
+
 class AttendanceVerifyScreen extends ConsumerStatefulWidget {
   const AttendanceVerifyScreen({super.key});
 
@@ -123,6 +143,14 @@ class _AttendanceVerifyScreenState
     try {
       await _scanner.start();
     } catch (_) {}
+  }
+
+  /// "확인": a verify round succeeded. Reset the controller and pop back to the
+  /// home screen — the student re-enters the verify screen later for the next
+  /// round (2차) once the professor opens it, rather than auto-jumping into it.
+  void _goHome() {
+    ref.read(attendanceControllerProvider.notifier).reset();
+    Navigator.of(context).popUntil((r) => r.isFirst);
   }
 
   @override
@@ -184,6 +212,15 @@ class _AttendanceVerifyScreenState
           SafeArea(
             child: Column(
               children: [
+                // Session context banner — "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)".
+                // Parsed from the QR context block; display only. Sits at the very
+                // top so the student knows which session/round they are authenticating
+                // against at a glance, over both the camera feed and the result view.
+                if (sessionContextLine(state) != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                    child: _SessionContextBanner(text: sessionContextLine(state)!),
+                  ),
                 // Upper region: left empty while capturing so the QR reticle
                 // window stays fully visible; the result fills it once done.
                 if (state.phase != VerifyPhase.capturing)
@@ -191,7 +228,11 @@ class _AttendanceVerifyScreenState
                     child: Center(
                       child: SingleChildScrollView(
                         padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
-                        child: _ResultPanel(state: state, onRetry: _retry),
+                        child: _ResultPanel(
+                          state: state,
+                          onRetry: _retry,
+                          onDone: _goHome,
+                        ),
                       ),
                     ),
                   )
@@ -208,6 +249,46 @@ class _AttendanceVerifyScreenState
                     ),
                   ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Compact one-line banner showing the parsed session context (course · slot ·
+/// week · phase). Semi-transparent so it stays readable over the live camera
+/// feed while capturing. Display only — never affects the verify flow.
+class _SessionContextBanner extends StatelessWidget {
+  const _SessionContextBanner({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      decoration: BoxDecoration(
+        color: const Color(0xE6FFFFFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.indigo.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.event_available,
+              size: 15, color: AppColors.indigo),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.foreground,
+              ),
             ),
           ),
         ],
@@ -479,8 +560,8 @@ class _StepNode extends StatelessWidget {
 ///
 /// A successful [VerifyStatus.verified] intentionally hides retry: re-capturing
 /// after a verified result only produces duplicate verifies (backend 409s).
-/// When check-in is verified but check-out is not, [shouldShowCheckoutCta]
-/// surfaces the "종료 인증하기" CTA instead (a new capture, not a retry).
+/// Instead the result panel shows a single "확인" button that returns to the
+/// home screen — the student re-enters later for the next round (2차).
 bool shouldShowRetry(AttendanceState state) {
   if (state.phase == VerifyPhase.error) return true;
   if (state.phase == VerifyPhase.done) {
@@ -489,24 +570,24 @@ bool shouldShowRetry(AttendanceState state) {
   return false;
 }
 
-/// The "종료 인증하기" CTA shows after a verified check-in, while check-out is
-/// still pending. It re-enters capture (via [restart]) for the second phase.
-bool shouldShowCheckoutCta(AttendanceState state) {
-  if (state.phase != VerifyPhase.done) return false;
-  return state.checkInDone && !state.checkOutDone;
-}
-
 /// Below the ring: submit spinner, soft error text, result detail, and the
-/// amber "다시 시도" action. Failure is presented as retry, not as absence.
+/// amber "다시 시도" action (failure) or the "확인" action (success → home).
+/// Failure is presented as retry, not as absence.
 class _ResultPanel extends StatelessWidget {
-  const _ResultPanel({required this.state, required this.onRetry});
+  const _ResultPanel({
+    required this.state,
+    required this.onRetry,
+    required this.onDone,
+  });
   final AttendanceState state;
   final Future<void> Function() onRetry;
+  final VoidCallback onDone;
 
   @override
   Widget build(BuildContext context) {
     final showRetry = shouldShowRetry(state);
-    final showCheckout = shouldShowCheckoutCta(state);
+    final showDone = state.phase == VerifyPhase.done &&
+        state.result?.status == VerifyStatus.verified;
     return Container(
       decoration: softCardDecoration(),
       child: Padding(
@@ -526,7 +607,7 @@ class _ResultPanel extends StatelessWidget {
                 ),
               ),
             if (state.phase == VerifyPhase.done && state.result != null)
-              _ResultDetail(result: state.result!),
+              _ResultDetail(state: state),
             if (showRetry) ...[
               const SizedBox(height: 4),
               const Text(
@@ -543,21 +624,15 @@ class _ResultPanel extends StatelessWidget {
                 label: const Text('다시 시도'),
               ),
             ],
-            // Verified check-in but check-out still pending → offer the
-            // second-phase capture. This is NOT a retry (check-in already
-            // succeeded); it re-enters capture for the 종료 인증.
-            if (showCheckout) ...[
-              const SizedBox(height: 4),
-              const Text(
-                '시작 인증이 완료되었습니다. 수업 종료 후 종료 인증을 진행하세요.',
-                style: TextStyle(fontSize: 12, color: AppColors.mutedForeground),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: () => onRetry(),
-                icon: const Icon(Icons.logout),
-                label: const Text('종료 인증하기'),
+            // Verified → a single "확인" button that returns to the home screen.
+            // The student re-enters the verify screen later for the next round
+            // (2차) once the professor opens it — we do NOT jump straight into
+            // a second capture from here.
+            if (showDone) ...[
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: onDone,
+                child: const Text('확인'),
               ),
             ],
           ],
@@ -568,17 +643,19 @@ class _ResultPanel extends StatelessWidget {
 }
 
 class _ResultDetail extends StatelessWidget {
-  const _ResultDetail({required this.result});
-  final VerifyResult result;
+  const _ResultDetail({required this.state});
+  final AttendanceState state;
+
+  VerifyResult get result => state.result!;
 
   String get _statusText {
     switch (result.status) {
       case VerifyStatus.verified:
-        // Phase-aware headline: 시작 인증 완료 / 종료 인증 완료. When the backend
-        // omits check_phase, fall back to a neutral "인증 완료".
-        if (result.checkPhase == CheckPhase.checkOut) return '종료 인증 완료';
-        if (result.checkPhase == CheckPhase.checkIn) return '시작 인증 완료';
-        return '인증 완료';
+        // Simple phase-aware headline: "1차 인증 성공" / "2차 인증 성공".
+        // When the backend omits check_phase, fall back to a neutral message.
+        if (result.checkPhase == CheckPhase.checkOut) return '2차 인증 성공';
+        if (result.checkPhase == CheckPhase.checkIn) return '1차 인증 성공';
+        return '인증 성공';
       case VerifyStatus.pending:
         return '대기 중 (교수 확인 필요)';
       case VerifyStatus.rejected:

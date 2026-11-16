@@ -8,11 +8,12 @@ SQLite (tests). UUIDs are stored as strings for cross-DB portability.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Integer,
@@ -96,6 +97,10 @@ class Course(Base):
     end_period: Mapped[int | None] = mapped_column(Integer)         # 종료 교시
     location: Mapped[str | None] = mapped_column(String(255))       # 강의실
     credits: Mapped[float | None] = mapped_column(Numeric(3, 1))    # 학점
+    # Semester start date (Monday of week 1) for auto week-number estimation
+    # of new sessions. Per-course so the next semester can differ. NULL means
+    # estimation is impossible -> the professor picks the week manually.
+    semester_start_date: Mapped[date | None] = mapped_column(Date)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (
@@ -175,6 +180,11 @@ class Session(Base):
     # `window_opened_at` / `window_expires_at` always describe the CURRENTLY
     # active window; opening checkout resets them to a fresh window.
     phase: Mapped[str] = mapped_column(String(16), nullable=False, default="check_in")
+    # True once the professor has opened the check_out (2차) window at least
+    # once for this session. Lets the UI distinguish "closed after 1차 only —
+    # 2차 can still be opened" from "closed after 2차 — session is final". The
+    # phase column alone cannot tell these apart (both read "closed").
+    checkout_opened: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     window_opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_now
     )

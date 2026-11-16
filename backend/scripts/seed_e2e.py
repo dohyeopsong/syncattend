@@ -20,13 +20,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_engine, get_sessionmaker
-from app.models import Course, Device, Enrollment, Session, User
+from app.models import Course, CourseSchedule, Device, Enrollment, Session, User
 from app.security import hash_password
 
 # --- Fixed seed identities (documented for B/C) ------------------------------
@@ -161,6 +161,7 @@ async def _get_or_create_course(
             end_period=spec.get("end_period"),
             location=spec.get("location"),
             credits=spec.get("credits"),
+            semester_start_date=date(2026, 9, 1),
         )
         db.add(course)
         await db.flush()
@@ -174,8 +175,42 @@ async def _get_or_create_course(
     course.end_period = spec.get("end_period")
     course.location = spec.get("location")
     course.credits = spec.get("credits")
+    course.semester_start_date = date(2026, 9, 1)
     await db.flush()
     return course
+
+
+async def _ensure_course_schedule(
+    db: AsyncSession, course: Course, spec: dict
+) -> None:
+    """Create a CourseSchedule row mirroring the course's primary slot, so the
+    open-session estimate can match the current day/period. Idempotent by
+    (course_id, day_of_week, start_period)."""
+    dow = spec.get("day_of_week")
+    sp = spec.get("start_period")
+    ep = spec.get("end_period")
+    if dow is None or sp is None or ep is None:
+        return
+    existing = (
+        await db.execute(
+            select(CourseSchedule).where(
+                CourseSchedule.course_id == course.id,
+                CourseSchedule.day_of_week == dow,
+                CourseSchedule.start_period == sp,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        return
+    db.add(
+        CourseSchedule(
+            course_id=course.id,
+            day_of_week=dow,
+            start_period=sp,
+            end_period=ep,
+        )
+    )
+    await db.flush()
 
 
 async def _ensure_enrollment(db: AsyncSession, course_id: str, student_id: str) -> None:
@@ -206,7 +241,7 @@ async def _open_fresh_session(db: AsyncSession, course_id: str) -> Session:
     now = _now()
     session = Session(
         course_id=course_id,
-        status="open",
+        phase="check_in",
         window_opened_at=now,
         window_expires_at=now + timedelta(seconds=_WINDOW_SECONDS),
     )
@@ -226,6 +261,11 @@ async def seed() -> dict:
             await _get_or_create_course(db, prof.id, spec, prof.name) for spec in COURSES
         ]
         by_name = {c.name: c for c in courses}
+
+        # Mirror each course's primary slot into course_schedules so the
+        # open-session estimate can match the current day/period.
+        for spec, c in zip(COURSES, courses):
+            await _ensure_course_schedule(db, c, spec)
 
         # Pre-enroll: student1 in the first 3 courses, student2 in 2 courses.
         # Both are enrolled in the session course so E2E attendance has takers.

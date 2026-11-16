@@ -37,7 +37,7 @@ import pytest
 from app.models import Attendance, Device
 from app.redis_client import get_redis
 from app.services.tokens import issue_tokens
-from conftest import auth_header, seed_course, seed_open_session, seed_user
+from conftest import auth_header, seed_course, seed_enrollment, seed_open_session, seed_user
 from app import db as app_db
 from sqlalchemy import func, select
 
@@ -98,6 +98,7 @@ async def test_300_distinct_students_verify_concurrently(client, session):
         u = await seed_user(session, f"s{i}.load@wku.ac.kr", role="student")
         dev = f"dev-{i:04d}"
         await _seed_device(session, u.id, dev)
+        await seed_enrollment(session, course.id, u.id)
         students.append((u, dev))
 
     async def one(u, dev):
@@ -137,6 +138,7 @@ async def test_single_student_concurrent_duplicates_only_one_wins(client, sessio
     student = await seed_user(session, "racer@wku.ac.kr", role="student")
     device_uuid = "dev-racer"
     await _seed_device(session, student.id, device_uuid)
+    await seed_enrollment(session, course.id, student.id)
 
     async def one():
         qr, audio = await _issue_pair(open_sess.id)
@@ -194,6 +196,7 @@ async def test_many_students_same_token_concurrently(client, session):
         u = await seed_user(session, f"s{i}.same@wku.ac.kr", role="student")
         dev = f"dev-same-{i:04d}"
         await _seed_device(session, u.id, dev)
+        await seed_enrollment(session, course.id, u.id)
         students.append((u, dev))
 
     # ONE shared token pair — simulates one QR on the professor's screen.

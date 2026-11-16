@@ -473,6 +473,100 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  /courses/{course_id}/schedules:
+    post:
+      tags: [courses]
+      summary: Add one weekly time slot to a course
+      description: >
+        Adds a single weekly time slot (e.g. Mon 1교시, or Wed 1~3교시) to a
+        course. A course meeting multiple times per week has one row per slot.
+        Rejects (409) if a slot with the same day/start_period already exists.
+        Professor-only; course owned by the caller.
+      operationId: addCourseSchedule
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateScheduleRequest' }
+      responses:
+        '201':
+          description: Slot created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ScheduleOut' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: A slot with this day/start_period already exists.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    get:
+      tags: [courses]
+      summary: List all weekly slots of a course
+      description: >
+        Returns every weekly slot of a course, ordered by day_of_week then
+        start_period. Readable by any authenticated user (timetable rendering).
+      operationId: listCourseSchedules
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '200':
+          description: Ordered list of weekly slots
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ScheduleOut' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /courses/{course_id}/schedules/{schedule_id}:
+    delete:
+      tags: [courses]
+      summary: Delete one weekly time slot
+      description: >
+        Deletes a single weekly slot. `sessions.schedule_id` is ON DELETE
+        SET NULL, so existing sessions survive slot deletion. Professor-only;
+        course owned by the caller.
+      operationId: deleteCourseSchedule
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { $ref: '#/components/parameters/CourseId' }
+        - name: schedule_id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Slot deleted (no body) }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /courses/{course_id}/attendance/matrix:
+    get:
+      tags: [courses]
+      summary: Cumulative per-student × per-week attendance matrix for a course
+      description: >
+        Returns each enrolled student's attendance status across 15 weeks
+        (index 0 = week 1). `null` means no session was held that week. Closed
+        sessions derive the final status from check_in/check_out timestamps;
+        open sessions show `present` if the student passed the currently-active
+        phase, else `pending`. When a week has multiple sessions, the worst
+        status (absent > pending > late > early_leave > present) is shown.
+        Professor-only; course owned by the caller.
+      operationId: getCourseAttendanceMatrix
+      security: [{ bearerAuth: [] }]
+      parameters: [{ $ref: '#/components/parameters/CourseId' }]
+      responses:
+        '200':
+          description: Attendance matrix
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AttendanceMatrix' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /courses/{course_id}/simulate-bots:
     post:
       tags: [courses]
@@ -528,6 +622,32 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
 
   # ------------------------------------------------------------ sessions
+  /sessions/estimate:
+    post:
+      tags: [sessions]
+      summary: Estimate the week + slot for a new session (no creation)
+      description: >
+        Pre-fills the open-session modal: derives week_number from the course's
+        semester_start_date and matches the current day/time against the course's
+        weekly CourseSchedule slots. Does NOT create a session — the professor
+        confirms or edits the estimate, then calls createSession. Professor-only;
+        course owned by the caller. All fields are nullable when estimation is
+        impossible (no semester_start_date, no matching slot, out of semester).
+      operationId: estimateSession
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SessionEstimateRequest' }
+      responses:
+        '200':
+          description: Estimated week + slot (all nullable)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SessionEstimate' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /sessions:
     post:
       tags: [sessions]
@@ -550,6 +670,11 @@ paths:
                   maximum: 15
                   nullable: true
                   description: academic week (1..15주차); optional
+                schedule_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: which weekly slot this session belongs to (Mon vs Tue); optional
       responses:
         '201':
           description: Session created, window open
@@ -1005,6 +1130,24 @@ components:
           description: 종료 교시 (1..12, >= start_period).
         location: { type: string, nullable: true, description: 강의실 }
         credits: { type: number, nullable: true, description: 학점 }
+        semester_start_date:
+          type: string
+          format: date
+          nullable: true
+          description: >-
+            학기 시작일 (1주차의 월요일). New sessions auto-estimate their
+            week_number from (today - semester_start_date). Per-course so the
+            next semester can differ. NULL means estimation is impossible and
+            the professor picks the week manually.
+        schedules:
+          type: array
+          nullable: true
+          description: >-
+            Multi-day weekly slots (1:N). When present, CourseSchedule rows are
+            created for each entry and the scalar day_of_week/start_period/
+            end_period columns are mirrored from the earliest slot. Absent
+            (null) = use the scalar fields only.
+          items: { $ref: '#/components/schemas/CreateScheduleRequest' }
 
     UpdateCourseRequest:
       type: object
@@ -1029,6 +1172,20 @@ components:
           description: 종료 교시 (1..12, >= start_period).
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
+        semester_start_date:
+          type: string
+          format: date
+          nullable: true
+          description: 학기 시작일 (1주차 월요일) for week auto-estimation.
+        schedules:
+          type: array
+          nullable: true
+          description: >-
+            Reconcile the course's weekly slots to EXACTLY this list when
+            present in the request body (an empty list clears all slots).
+            Absent (null) leaves existing slots untouched. The scalar columns
+            are re-mirrored from the earliest surviving slot.
+          items: { $ref: '#/components/schemas/CreateScheduleRequest' }
 
     Course:
       type: object
@@ -1044,7 +1201,12 @@ components:
         end_period: { type: integer, nullable: true }
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
+        semester_start_date: { type: string, format: date, nullable: true }
         created_at: { type: string, format: date-time }
+        schedules:
+          type: array
+          description: All weekly slots (multi-day support), ordered by day then start_period.
+          items: { $ref: '#/components/schemas/ScheduleOut' }
 
     CourseCatalogItem:
       type: object
@@ -1062,6 +1224,10 @@ components:
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
         enrolled: { type: boolean, description: whether the calling student is enrolled }
+        schedules:
+          type: array
+          description: All weekly slots (multi-day support), ordered by day then start_period.
+          items: { $ref: '#/components/schemas/ScheduleOut' }
 
     MyCourseItem:
       type: object
@@ -1078,6 +1244,10 @@ components:
         end_period: { type: integer, nullable: true }
         location: { type: string, nullable: true }
         credits: { type: number, nullable: true }
+        schedules:
+          type: array
+          description: All weekly slots (multi-day support), ordered by day then start_period.
+          items: { $ref: '#/components/schemas/ScheduleOut' }
 
     EnrollRequest:
       type: object
@@ -1106,6 +1276,15 @@ components:
         session_id: { type: string }
         course_id: { type: string }
         week_number: { type: integer, minimum: 1, maximum: 15, nullable: true, description: academic week (1..15주차) }
+        schedule_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: which weekly CourseSchedule slot this session belongs to (e.g. the Mon slot vs the Tue slot).
+        schedule_label:
+          type: string
+          nullable: true
+          description: human-readable slot label derived from schedule_id (e.g. "월 1교시", "화 2~3교시"). Null for ad-hoc / legacy sessions.
         window_open: { type: boolean }
         window_remaining: { type: integer, description: seconds left in the currently active auth window }
         phase:
@@ -1115,6 +1294,57 @@ components:
             Attendance lifecycle phase. check_in = the start-of-class auth
             window is open; check_out = the end-of-class auth window is open
             (professor opened checkout); closed = session finalised.
+        checkout_opened:
+          type: boolean
+          description: >
+            True once the professor opened the 2차 (check_out) window at least
+            once. The UI uses this to show "2차 인증 열기" only when the second
+            phase hasn't happened yet (phase alone can't tell closed-after-1차
+            from closed-after-2차).
+
+    SessionEstimateRequest:
+      type: object
+      required: [course_id]
+      properties:
+        course_id: { type: string }
+
+    SessionEstimate:
+      type: object
+      description: >
+        Estimated week + slot for a new session. All fields nullable: when
+        estimation is impossible (no semester_start_date, no matching slot, out
+        of semester range), the professor picks values manually.
+      properties:
+        week_number:
+          type: integer
+          minimum: 1
+          maximum: 15
+          nullable: true
+          description: estimated academic week (1..15), or null if before/past the semester or no start date.
+        schedule_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: matched CourseSchedule slot id for the current day/time, or null.
+        schedule_label:
+          type: string
+          nullable: true
+          description: human-readable label for the matched slot (e.g. "월 1교시"), or null.
+        suggested_phase:
+          type: string
+          enum: [check_in, check_out]
+          default: check_in
+          description: >-
+            Which auth round to default the modal to. "check_out" when a closed
+            session for the estimated week+slot already has 1차 done but 2차 not
+            opened yet — the professor is re-opening for 2차.
+        pending_session_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            When suggested_phase is "check_out", the id of the existing session
+            to re-open (openCheckout). Null for a new 1차 session.
 
     SessionToken:
       type: object
@@ -1169,13 +1399,19 @@ components:
         device_matched: { type: boolean }
         reason:
           type: string
-          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          enum: [window_closed, not_enrolled, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
         check_phase:
           type: string
           enum: [check_in, check_out]
           nullable: true
           description: Which phase this verify counted towards (set on success, null on rejection).
+        check_in_done:
+          type: boolean
+          description: True when the student's 1차 (check_in) timestamp is set after this verify.
+        check_out_done:
+          type: boolean
+          description: True when the student's 2차 (check_out) timestamp is set after this verify.
         risk_warning:
           $ref: '#/components/schemas/RiskWarning'
           nullable: true
@@ -1188,12 +1424,12 @@ components:
         expected_rejected: { type: boolean }
         expected_reason:
           type: string
-          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          enum: [window_closed, not_enrolled, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
         rejected: { type: boolean }
         reason:
           type: string
-          enum: [window_closed, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
+          enum: [window_closed, not_enrolled, cross_verify_failed, nonce_reused, device_mismatch, duplicate_attendance]
           nullable: true
         passed: { type: boolean, description: True if the actual outcome matched the expected }
 
@@ -1252,6 +1488,44 @@ components:
         removed: { type: integer }
         cleaned_up: { type: boolean }
 
+    CreateScheduleRequest:
+      type: object
+      description: >
+        One weekly time slot for a course (e.g. Mon 1교시, or Wed 1~3교시).
+        day_of_week: 0=Mon..6=Sun. Periods run 1..12 (1교시..12교시).
+        start_period must be <= end_period.
+      required: [day_of_week, start_period, end_period]
+      properties:
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week, 0=Monday .. 6=Sunday.
+        start_period:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: Starting period (1..12).
+        end_period:
+          type: integer
+          minimum: 1
+          maximum: 12
+          description: Ending period (1..12); must be >= start_period.
+
+    ScheduleOut:
+      type: object
+      description: A single weekly time slot of a course.
+      properties:
+        id: { type: string, format: uuid }
+        course_id: { type: string, format: uuid }
+        day_of_week:
+          type: integer
+          minimum: 0
+          maximum: 6
+          description: Day of week, 0=Monday .. 6=Sunday.
+        start_period: { type: integer, minimum: 1, maximum: 12 }
+        end_period: { type: integer, minimum: 1, maximum: 12 }
+
     AttendanceStatus:
       type: string
       enum: [present, absent, late, early_leave, pending]
@@ -1302,8 +1576,12 @@ components:
         early_leave: { type: integer, description: Students resolved as early_leave (check_in only). Closed session only. }
         unverified:
           type: array
-          description: Students with no resolved status yet (still pending / no record), with readable display fields.
+          description: Students with no resolved status yet (still pending / no record), with readable display fields. Kept for backward compatibility; the `roster` field supersedes it for the review table.
           items: { $ref: '#/components/schemas/UnverifiedStudent' }
+        roster:
+          type: array
+          description: Full per-student roster with 1차/2차 phase state + derived status. Every enrolled student appears here (not just pending ones), so the professor review table can show each phase independently.
+          items: { $ref: '#/components/schemas/RosterStudent' }
 
     UnverifiedStudent:
       type: object
@@ -1317,6 +1595,57 @@ components:
         student_id: { type: string, description: Internal user id (UUID) — the Delta/batch key. }
         student_number: { type: string, nullable: true, description: School 학번. }
         name: { type: string, nullable: true, description: Display name. }
+
+    RosterStudent:
+      type: object
+      description: |
+        One enrolled student's per-phase verification state for a session. The
+        final `status` is derived from the two phase timestamps:
+        present (both), early_leave (check_in only), late (check_out only),
+        absent (neither, after close) / pending (before close). `check_in_done`
+        and `check_out_done` expose the raw 1차/2차 result so the review table
+        can render each phase independently of the derived status.
+      properties:
+        student_id: { type: string, description: Internal user id (UUID) — the Delta/batch key. }
+        student_number: { type: string, nullable: true, description: School 학번. }
+        name: { type: string, nullable: true, description: Display name. }
+        status: { $ref: '#/components/schemas/AttendanceStatus' }
+        check_in_done: { type: boolean, description: 1차 (check_in) timestamp present. }
+        check_out_done: { type: boolean, description: 2차 (check_out) timestamp present. }
+
+    AttendanceMatrixStudent:
+      type: object
+      description: One enrolled student's per-week attendance status across the semester.
+      properties:
+        student_id: { type: string, description: Internal user id (UUID). }
+        student_number: { type: string, nullable: true, description: School 학번. }
+        name: { type: string, nullable: true, description: Display name. }
+        weeks:
+          type: array
+          description: >
+            Length 15, index 0 = week 1. Each element is an AttendanceStatus or
+            null (null = no session held that week).
+          items: { $ref: '#/components/schemas/AttendanceStatus', nullable: true }
+
+    AttendanceMatrix:
+      type: object
+      description: >
+        Course-wide cumulative attendance matrix: enrolled students x 15 weeks.
+        Closed sessions derive the final status from check_in/check_out
+        timestamps; open sessions show `present` if the student passed the
+        currently-active phase, else `pending`. When a week has multiple
+        sessions, the worst status (absent > pending > late > early_leave >
+        present) is shown.
+      properties:
+        course_id: { type: string }
+        course_name: { type: string, nullable: true }
+        weeks:
+          type: array
+          description: Week numbers (1..15) that have at least one session.
+          items: { type: integer, minimum: 1, maximum: 15 }
+        students:
+          type: array
+          items: { $ref: '#/components/schemas/AttendanceMatrixStudent' }
 
     RiskWarning:
       type: object

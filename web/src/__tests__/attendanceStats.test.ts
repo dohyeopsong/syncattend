@@ -22,6 +22,7 @@ const agg = (
   late: 0,
   early_leave: 0,
   unverified: unverified.map((student_id) => ({ student_id })),
+  roster: [],
   ...extra,
 });
 

@@ -175,6 +175,8 @@ class VerifyResult {
     required this.deviceMatched,
     required this.reason,
     this.checkPhase,
+    this.checkInDone = false,
+    this.checkOutDone = false,
     this.riskWarning,
   });
 
@@ -186,6 +188,14 @@ class VerifyResult {
   /// Which dual-auth phase this verify completed (null when not verified or
   /// when the backend omits it). Drives the 시작/종료 인증 완료 UI.
   final CheckPhase? checkPhase;
+
+  /// Whether the 1차 (check_in) / 2차 (check_out) timestamp is set on the
+  /// student's attendance row AFTER this verify. The app uses these to show
+  /// 1차/2차 completion accurately even after its UI state is reset
+  /// (autoDispose), and to surface the final attendance outcome:
+  /// both done → 출석, 1차 only → 조퇴, 2차 only → 지각.
+  final bool checkInDone;
+  final bool checkOutDone;
   final RiskWarning? riskWarning;
 
   factory VerifyResult.fromJson(Map<String, dynamic> json) => VerifyResult(
@@ -196,6 +206,8 @@ class VerifyResult {
         checkPhase: json['check_phase'] == null
             ? null
             : _checkPhaseFromString(json['check_phase'] as String?),
+        checkInDone: json['check_in_done'] as bool? ?? false,
+        checkOutDone: json['check_out_done'] as bool? ?? false,
         riskWarning: json['risk_warning'] != null
             ? RiskWarning.fromJson(
                 json['risk_warning'] as Map<String, dynamic>)

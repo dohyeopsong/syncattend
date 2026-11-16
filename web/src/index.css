@@ -1,48 +1,120 @@
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    /* Soft Campus palette — warm tinted ground, softer slate text, rounder
-       surfaces, soft layered shadows. Inspired by campus portal aesthetics:
-       friendly and approachable while staying clean and legible. */
-    --background: 230 25% 97%;          /* #F6F8FC warm light blue-gray ground */
-    --foreground: 215 28% 17%;          /* #1E293B slate-800, softer than gray */
-    --card: 0 0% 100%;                  /* #FFFFFF pure white cards float on ground */
-    --card-foreground: 215 28% 17%;
+    /* Warm — 60/30/10 rule: terracotta + butter yellow + cream.
+       60% #FFFBEB (cream)         → main: page ground, cards, sidebar — sets the
+         overall calm, warm atmosphere.
+       30% #FEF08A (butter yellow) → sub: secondary/muted/accent surfaces, hover
+         fills, borders — section dividers and card differentiation.
+       10% #C2410C (terracotta)    → point: primary action, links, emphasis, chart
+         main series — the brand identity color that draws the eye.
+       Status colors (destructive/warning/success) stay chromatic for semantics. */
+    /* Clean neutral — white ground, light-grey cards, blue actions.
+       background  → white (page + sidebar + header).
+       card/muted  → light grey; cards lift clearly off the white ground.
+       primary     → blue — the only action/emphasis color (buttons, links,
+         focus rings, chart main series).
+       Status colors (destructive/warning/success) stay chromatic for semantics. */
+    --background: oklch(0.97 0 0);               /* light grey — page ground */
+    --foreground: oklch(0.21 0.02 256);          /* near-black slate text */
+    --card: oklch(1 0 0);                        /* white — card surface */
+    --card-foreground: oklch(0.21 0.02 256);
 
-    --primary: 239 84% 67%;             /* #6366F1 indigo-500, softer accent */
-    --primary-foreground: 0 0% 100%;    /* white-on-primary */
+    --primary: oklch(0.546 0.215 262.88);        /* blue-600 #2563EB */
+    --primary-foreground: oklch(1 0 0);          /* white-on-blue */
 
-    --secondary: 210 40% 96%;           /* #F1F5F9 slate-100 */
-    --secondary-foreground: 215 28% 17%;
-    --muted: 210 40% 96%;               /* #F1F5F9 */
-    --muted-foreground: 215 16% 47%;    /* #64748B slate-500 */
-    --accent: 239 84% 94%;              /* #E8EAFE indigo subtle, slightly more visible */
-    --accent-foreground: 239 84% 67%;
+    --secondary: oklch(0.96 0 0);                /* light grey — secondary surface */
+    --secondary-foreground: oklch(0.21 0.02 256);
+    --muted: oklch(0.96 0 0);                    /* light grey — muted surface */
+    --muted-foreground: oklch(0.55 0.02 256);    /* mid grey text */
+    --accent: oklch(0.94 0 0);                   /* slightly deeper grey — hover */
+    --accent-foreground: oklch(0.21 0.02 256);
 
-    --destructive: 0 84% 60%;           /* #EF4444 danger */
-    --destructive-foreground: 0 0% 100%;
-    --warning: 38 92% 50%;              /* #F59E0B warning */
-    --warning-foreground: 0 0% 100%;
-    --success: 142 71% 45%;             /* #22C55E success */
-    --success-foreground: 0 0% 100%;
+    --destructive: oklch(0.577 0.245 27.325);    /* red-600 — status only */
+    --destructive-foreground: oklch(0.985 0 0);
+    --warning: oklch(0.769 0.188 70.08);         /* amber — status only */
+    --warning-foreground: oklch(0.985 0 0);
+    --success: oklch(0.627 0.194 149.214);       /* green — status only */
+    --success-foreground: oklch(0.985 0 0);
 
-    --border: 214 32% 91%;              /* #E2E8F0 hairline */
-    --input: 214 32% 91%;
-    --ring: 239 84% 67%;                /* focus ring = primary */
-    --radius: 1rem;                     /* 16px — rounder, friendlier */
+    --border: oklch(0.92 0 0);                   /* light grey hairline */
+    --input: oklch(0.92 0 0);                    /* light grey */
+    --ring: oklch(0.546 0.215 262.88);           /* blue — focus/emphasis */
+    --radius: 0.625rem;                          /* 8px */
+
+    --popover: oklch(1 0 0);                     /* white — matches cards */
+    --popover-foreground: oklch(0.21 0.02 256);
+    /* Chart ramp: blue (main) → greys. */
+    --chart-1: oklch(0.546 0.215 262.88);        /* blue — main series */
+    --chart-2: oklch(0.623 0.214 259.815);       /* blue-500 */
+    --chart-3: oklch(0.55 0 0);                  /* mid grey */
+    --chart-4: oklch(0.70 0 0);                  /* light-mid grey */
+    --chart-5: oklch(0.85 0 0);                  /* light grey */
+    --sidebar: oklch(0.97 0 0);                  /* light grey */
+    --sidebar-foreground: oklch(0.21 0.02 256);
+    --sidebar-primary: oklch(0.546 0.215 262.88);/* blue */
+    --sidebar-primary-foreground: oklch(1 0 0);
+    --sidebar-accent: oklch(0.96 0 0);           /* light grey — active item */
+    --sidebar-accent-foreground: oklch(0.21 0.02 256);
+    --sidebar-border: oklch(0.92 0 0);           /* light grey */
+    --sidebar-ring: oklch(0.546 0.215 262.88);   /* blue */
   }
 
   * {
-    border-color: hsl(var(--border));
+    border-color: var(--border);
+    outline-color: color-mix(in oklch, var(--ring) 50%, transparent);
   }
 
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-    font-family: "Pretendard", system-ui, -apple-system, "Segoe UI", sans-serif;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: "Geist Variable", system-ui, -apple-system, "Segoe UI", "Pretendard", sans-serif;
+  }
+  .theme {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+  }
+  .dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+    --destructive: oklch(0.704 0.191 22.216);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+    --chart-1: oklch(0.87 0 0);
+    --chart-2: oklch(0.556 0 0);
+    --chart-3: oklch(0.439 0 0);
+    --chart-4: oklch(0.371 0 0);
+    --chart-5: oklch(0.269 0 0);
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+  }
+  html {
+    @apply font-sans;
   }
 }
 
@@ -52,7 +124,7 @@
    motion get a calm static UI (no shimmer, no pulse, no spin). Meaning is never
    carried by motion alone — these are purely decorative/affordance hints. */
 @layer utilities {
-  /* Skeleton placeholder: a soft left-to-right shimmer over a neutral block. */
+  /* Skeleton placeholder: a neutral block with a subtle sweep. */
   .skeleton {
     background-color: hsl(var(--muted));
     border-radius: calc(var(--radius) - 2px);
@@ -63,7 +135,7 @@
       background-image: linear-gradient(
         90deg,
         hsl(var(--muted)) 0%,
-        hsl(210 40% 94%) 50%,
+        hsl(240 6% 93%) 50%,
         hsl(var(--muted)) 100%
       );
       background-size: 200% 100%;

@@ -33,6 +33,10 @@ class AttendanceState {
     this.error,
     this.checkInDone = false,
     this.checkOutDone = false,
+    this.courseName,
+    this.scheduleLabel,
+    this.weekNumber,
+    this.isCheckoutPhase = false,
   });
 
   final VerifyPhase phase;
@@ -50,6 +54,23 @@ class AttendanceState {
 
   /// True once a verify returned `verified` for the check-out (수업 종료) phase.
   final bool checkOutDone;
+
+  // ---- Session context (display only) -------------------------------------
+  // Parsed from the professor's QR context block (after "||"). Lets the student
+  // see WHICH session / week / slot / phase they are authenticating against,
+  // e.g. "자료구조 · 월 1교시 · 3주차 · 시작 인증 (1/2)". Not used by verify.
+  final String? courseName;
+  final String? scheduleLabel;
+  final int? weekNumber;
+
+  /// True when the QR context block identified this as the check_out (종료) phase.
+  final bool isCheckoutPhase;
+
+  /// Whether any context field was supplied — drives the context banner visibility.
+  bool get hasContext =>
+      (courseName != null && courseName!.isNotEmpty) ||
+      (scheduleLabel != null && scheduleLabel!.isNotEmpty) ||
+      weekNumber != null;
 
   bool get hasQr => qrToken != null && qrToken!.isNotEmpty;
   bool get hasAudio => audioNonce != null && audioNonce!.isNotEmpty;
@@ -73,6 +94,10 @@ class AttendanceState {
     Object? error = _unset,
     bool? checkInDone,
     bool? checkOutDone,
+    Object? courseName = _unset,
+    Object? scheduleLabel = _unset,
+    Object? weekNumber = _unset,
+    bool? isCheckoutPhase,
   }) =>
       AttendanceState(
         phase: phase ?? this.phase,
@@ -89,6 +114,16 @@ class AttendanceState {
         error: identical(error, _unset) ? this.error : error as String?,
         checkInDone: checkInDone ?? this.checkInDone,
         checkOutDone: checkOutDone ?? this.checkOutDone,
+        courseName: identical(courseName, _unset)
+            ? this.courseName
+            : courseName as String?,
+        scheduleLabel: identical(scheduleLabel, _unset)
+            ? this.scheduleLabel
+            : scheduleLabel as String?,
+        weekNumber: identical(weekNumber, _unset)
+            ? this.weekNumber
+            : weekNumber as int?,
+        isCheckoutPhase: isCheckoutPhase ?? this.isCheckoutPhase,
       );
 }
 
@@ -144,14 +179,37 @@ class AttendanceController extends StateNotifier<AttendanceState> {
   void onQrDetected(String raw) {
     if (state.phase != VerifyPhase.capturing) return;
     // Contract: qr_token + session_id come from the professor's rotating QR.
-    // We accept either a bare token or "sessionId|qrToken" framing.
+    // Payload shape: "sessionId|qrToken" with an OPTIONAL display-only context
+    // block appended after "||": "sessionId|qrToken||course|label|week|phase".
+    // The context block is parsed for the session-context banner; it is never
+    // sent to verify. Splitting on "||" first keeps auth parsing untouched.
+    final ctxSplit = raw.split('||');
+    final authPart = ctxSplit.first;
+    final ctxPart = ctxSplit.length > 1 ? ctxSplit[1] : '';
+
     String? sessionId = state.sessionId;
-    String qr = raw;
-    if (raw.contains('|')) {
-      final parts = raw.split('|');
+    String qr = authPart;
+    if (authPart.contains('|')) {
+      final parts = authPart.split('|');
       sessionId = parts.first;
       qr = parts.length > 1 ? parts[1] : '';
     }
+
+    // Parse the display-only context block: course|label|week|phaseCode.
+    String? courseName;
+    String? scheduleLabel;
+    int? weekNumber;
+    bool isCheckout = false;
+    if (ctxPart.isNotEmpty) {
+      final f = ctxPart.split('|');
+      courseName = f.isNotEmpty && f[0].isNotEmpty ? f[0] : null;
+      scheduleLabel = f.length > 1 && f[1].isNotEmpty ? f[1] : null;
+      final wk = f.length > 2 ? int.tryParse(f[2]) : null;
+      weekNumber = (wk != null && wk > 0) ? wk : null;
+      final phaseCode = f.length > 3 ? f[3] : '';
+      isCheckout = phaseCode == '2';
+    }
+
     // Keep the already-decoded audioNonce. Clearing it here (the old behaviour)
     // forced a re-decode AFTER the QR scan; if the token rotated during that
     // gap the fresh nonce belonged to a different rotation than the scanned QR
@@ -160,7 +218,14 @@ class AttendanceController extends StateNotifier<AttendanceState> {
     // broadcasting, keeping it lets QR+audio be captured SIMULTANEOUSLY and
     // usually from the same rotation window. Both can arrive in either order;
     // _maybeSubmit fires submit as soon as both are present.
-    state = state.copyWith(qrToken: qr, sessionId: sessionId);
+    state = state.copyWith(
+      qrToken: qr,
+      sessionId: sessionId,
+      courseName: courseName,
+      scheduleLabel: scheduleLabel,
+      weekNumber: weekNumber,
+      isCheckoutPhase: isCheckout,
+    );
     _maybeSubmit();
   }
 
@@ -230,18 +295,22 @@ class AttendanceController extends StateNotifier<AttendanceState> {
 
       // Record which dual-auth phase just succeeded so the UI can show
       // 시작/종료 인증 완료 separately and offer the second-phase capture.
-      // These flags accumulate (never reset on a failure) so a retry of the
-      // SAME phase after a verified result keeps the earlier success.
-      final phaseDone = result.status == VerifyStatus.verified
-          ? result.checkPhase
-          : null;
+      // The server returns the ACTUAL row state (check_in_done / check_out_done)
+      // after this verify, so we trust it over the local accumulator — this
+      // stays correct even when the autoDispose provider was reset between the
+      // 1차 (수업 시작) and 2차 (수업 종료) captures, which typically happen in
+      // separate screen sessions.
+      final newCheckIn = result.status == VerifyStatus.verified
+          ? result.checkInDone
+          : state.checkInDone;
+      final newCheckOut = result.status == VerifyStatus.verified
+          ? result.checkOutDone
+          : state.checkOutDone;
       state = state.copyWith(
         phase: VerifyPhase.done,
         result: result,
-        checkInDone:
-            state.checkInDone || phaseDone == CheckPhase.checkIn,
-        checkOutDone:
-            state.checkOutDone || phaseDone == CheckPhase.checkOut,
+        checkInDone: state.checkInDone || newCheckIn,
+        checkOutDone: state.checkOutDone || newCheckOut,
       );
     } on ApiError catch (e) {
       state = state.copyWith(phase: VerifyPhase.error, error: e.detail);

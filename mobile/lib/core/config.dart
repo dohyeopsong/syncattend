@@ -32,6 +32,6 @@ class AppConfig {
   /// Ultrasonic audio-token band the professor client emits nonces on.
   /// MUST match the web emitter DEFAULT_PROTOCOL (web/src/lib/ultrasonicEmitter.ts)
   /// and the AudioNonceDecoder defaults (audio_nonce_decoder.dart).
-  static const double audioBandLowHz = 18500;
-  static const double audioBandHighHz = 20000;
+  static const double audioBandLowHz = 17000;
+  static const double audioBandHighHz = 18500;
 }

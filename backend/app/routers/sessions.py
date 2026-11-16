@@ -21,6 +21,8 @@ from app.schemas import (
     CreateSessionRequest,
     ExtendWindowRequest,
     OpenCheckoutRequest,
+    SessionEstimate,
+    SessionEstimateRequest,
     SessionOut,
     SessionToken,
     SimulationCase,
@@ -28,6 +30,7 @@ from app.schemas import (
     VerifyReason,
 )
 from app.services.ownership import load_owned_session
+from app.services.session_estimate import estimate_session
 from app.services.tokens import get_or_rotate_tokens, issue_tokens
 from app.services.verify import run_verification
 from app.timeutil import as_aware, now as _now
@@ -45,16 +48,36 @@ def _window_state(session: Session) -> tuple[bool, int]:
     return True, remaining
 
 
-def _to_out(session: Session) -> SessionOut:
+async def _schedule_label(
+    db: AsyncSession, schedule_id: str | None
+) -> str | None:
+    """Human label for a session's schedule_id (e.g. '화 2~3교시'), or None."""
+    if schedule_id is None:
+        return None
+    slot = (
+        await db.execute(
+            select(CourseSchedule).where(CourseSchedule.id == schedule_id)
+        )
+    ).scalar_one_or_none()
+    if slot is None:
+        return None
+    from app.services.session_estimate import schedule_label as _label
+
+    return _label(slot)
+
+
+async def _to_out(db: AsyncSession, session: Session) -> SessionOut:
     is_open, remaining = _window_state(session)
     return SessionOut(
         session_id=session.id,
         course_id=session.course_id,
         week_number=session.week_number,
         schedule_id=session.schedule_id,
+        schedule_label=await _schedule_label(db, session.schedule_id),
         window_open=is_open,
         window_remaining=remaining,
         phase=session.phase,
+        checkout_opened=session.checkout_opened,
     )
 
 
@@ -62,6 +85,64 @@ async def _load_owned_session(
     db: AsyncSession, session_id: str, professor_id: str
 ) -> Session:
     return await load_owned_session(db, session_id, professor_id)
+
+
+@router.post(
+    "/estimate", response_model=SessionEstimate, operation_id="estimateSession",
+)
+async def estimate_session_endpoint(
+    body: SessionEstimateRequest,
+    prof: CurrentUser = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+) -> SessionEstimate:
+    """Estimate the week_number + schedule_id for a new session in this course.
+
+    Uses the current time + the course's semester_start_date + its weekly
+    CourseSchedule rows. Does NOT create a session — the professor's open-session
+    modal calls this to pre-fill the values, then the professor confirms/edits
+    and calls createSession. Professor-only; course owned by the caller.
+    """
+    course = (
+        await db.execute(select(Course).where(Course.id == body.course_id))
+    ).scalar_one_or_none()
+    if course is None or course.professor_id != prof.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="not your course"
+        )
+    week, schedule_id, label = await estimate_session(
+        db, course=course, now=_now()
+    )
+    # If a session already exists for this estimated week (+ slot when known)
+    # that finished 1차 (closed) but hasn't opened 2차 yet (checkout_opened
+    # False), default the modal to 2차 and hand back that session's id so the
+    # web can openCheckout on it instead of creating a brand-new session.
+    suggested_phase = "check_in"
+    pending_session_id: str | None = None
+    if week is not None:
+        query = (
+            select(Session)
+            .where(
+                Session.course_id == course.id,
+                Session.week_number == week,
+                Session.phase == "closed",
+                Session.checkout_opened.is_(False),
+            )
+            .order_by(Session.window_opened_at.desc())
+            .limit(1)
+        )
+        if schedule_id is not None:
+            query = query.where(Session.schedule_id == schedule_id)
+        existing = (await db.execute(query)).scalar_one_or_none()
+        if existing is not None:
+            suggested_phase = "check_out"
+            pending_session_id = existing.id
+    return SessionEstimate(
+        week_number=week,
+        schedule_id=schedule_id,
+        schedule_label=label,
+        suggested_phase=suggested_phase,
+        pending_session_id=pending_session_id,
+    )
 
 
 @router.post(
@@ -105,7 +186,7 @@ async def create_session(
     db.add(session)
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.post(
@@ -128,7 +209,7 @@ async def extend_window(
     session.window_expires_at = base + timedelta(seconds=add_seconds)
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.post(
@@ -142,15 +223,17 @@ async def open_checkout(
 ) -> SessionOut:
     """Open the check_out (end-of-class) auth window.
 
-    Transitions the session phase check_in → check_out and resets the active
-    window to a fresh length (body.window_seconds, or the default auth window).
-    Students then verify again against this end-of-class window.
+    Transitions the session phase → check_out and resets the active window to a
+    fresh length (body.window_seconds, or the default auth window). Students then
+    verify again against this end-of-class window.
+
+    Allowed from BOTH check_in and closed: the professor closes the 1차 window
+    (→ closed), reviews absentees, then re-opens the SAME session here for 2차.
+    The attendance rows are phase-aware, so the final status still derives from
+    the two timestamps (present=both, early_leave=check_in only,
+    late=check_out only, absent=neither) at batchClose.
     """
     session = await _load_owned_session(db, id, prof.id)
-    if session.phase == "closed":
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail="session is closed"
-        )
     if session.phase == "check_out":
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -162,11 +245,12 @@ async def open_checkout(
     )
     now = _now()
     session.phase = "check_out"
+    session.checkout_opened = True
     session.window_opened_at = now
     session.window_expires_at = now + timedelta(seconds=window)
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.post("/{id}/close", response_model=SessionOut, operation_id="closeSession")
@@ -179,7 +263,7 @@ async def close_session(
     session.phase = "closed"
     await db.commit()
     await db.refresh(session)
-    return _to_out(session)
+    return await _to_out(db, session)
 
 
 @router.get("/{id}/token", response_model=SessionToken, operation_id="getSessionToken")
@@ -189,6 +273,15 @@ async def get_session_token(
     db: AsyncSession = Depends(get_db),
 ) -> SessionToken:
     session = await _load_owned_session(db, id, prof.id)
+    # A closed session must NOT issue new tokens — the professor already ended
+    # the round. Without this guard, polling after close kept rotating the QR +
+    # audio nonce, so the student app could still "see" a live token for a
+    # session that was supposed to be over.
+    if session.phase == "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="session is closed",
+        )
     is_open, remaining = _window_state(session)
     # Reuse the current token until near-expiry; only rotate when its TTL is
     # almost up. Polling this endpoint must NOT rotate every call (that made

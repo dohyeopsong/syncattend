@@ -3,6 +3,8 @@ import { CoursePanel } from "@/components/CoursePanel";
 import { QrSessionModal } from "@/components/QrSessionModal";
 import { SimulationPanel } from "@/components/SimulationPanel";
 import { AttendanceTable } from "@/components/AttendanceTable";
+import { RiskGraphPanel } from "@/components/RiskGraphPanel";
+import { AbsenceRankChart } from "@/components/AbsenceRankChart";
 import { useSessionStore } from "@/store/session";
 import { Button } from "@/components/ui/button";
 import { X } from "lucide-react";
@@ -18,6 +20,12 @@ export function DashboardPage() {
       <section id="courses" className="scroll-mt-20">
         <CoursePanel />
       </section>
+
+      {/* F-grade risk graph — current-session basis */}
+      <RiskGraphPanel />
+
+      {/* 결석 랭킹 가로 막대그래프 */}
+      <AbsenceRankChart />
 
       {/* Verification simulation */}
       <section id="simulation" className="scroll-mt-20">

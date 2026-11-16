@@ -32,7 +32,8 @@ from app.schemas import (
     VerifyRequest,
     VerifyResult,
 )
-from app.services.aggregate import build_aggregate
+from app.services.aggregate import build_aggregate, invalidate_course_matrix
+from app.services.events import notify_session_changed, notify_student_changed
 from app.services.ownership import load_owned_session
 from app.services.verify import run_verification
 
@@ -237,33 +238,10 @@ async def batch_close_attendance(
     # A close finalises the session: ensure phase=closed so the live aggregate
     # switches to showing resolved statuses.
     session.phase = "closed"
-    # 1. Apply explicit deltas (professor-in-the-loop corrections).
-    for delta in body.deltas:
-        existing = (
-            await db.execute(
-                select(Attendance).where(
-                    Attendance.session_id == id,
-                    Attendance.student_id == delta.student_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing is None:
-            db.add(
-                Attendance(
-                    session_id=id,
-                    student_id=delta.student_id,
-                    device_uuid=f"delta:{delta.student_id}",  # placeholder for non-verified
-                    status=delta.status.value,
-                    corrected_by=prof.id,
-                )
-            )
-        elif existing.status != delta.status.value:
-            existing.status = delta.status.value
-            existing.corrected_by = prof.id
-    # 2. Auto-derive: every enrolled student whose status is still pending gets
-    #    a final status from the two timestamps. No record at all → absent.
-    #    This is the "no pending after close" policy — 미인증/대기 학생은 마감
-    #    시 타임스탬프 기준으로 확정된다.
+
+    # 2. Load enrolled students + ALL existing attendance records in TWO queries
+    #    (not N+1). Both are needed before applying deltas (step 1) so we can
+    #    decide INSERT vs UPDATE without a per-delta SELECT.
     enrolled = (
         (
             await db.execute(
@@ -275,6 +253,7 @@ async def batch_close_attendance(
         .scalars()
         .all()
     )
+    enrolled_set = set(enrolled)
     records = (
         (
             await db.execute(
@@ -285,19 +264,43 @@ async def batch_close_attendance(
         .all()
     )
     rec_by_student = {r.student_id: r for r in records}
-    for sid in enrolled:
+
+    # 1. Apply explicit deltas (professor-in-the-loop corrections) using the
+    #    pre-loaded record map — no per-delta SELECT.
+    delta_by_student = {d.student_id: d for d in body.deltas}
+    for sid, delta in delta_by_student.items():
+        existing = rec_by_student.get(sid)
+        if existing is None:
+            new_rec = Attendance(
+                session_id=id,
+                student_id=sid,
+                device_uuid=f"delta:{sid}",  # placeholder for non-verified
+                status=delta.status.value,
+                corrected_by=prof.id,
+            )
+            db.add(new_rec)
+            rec_by_student[sid] = new_rec  # so step 2 sees it
+        elif existing.status != delta.status.value:
+            existing.status = delta.status.value
+            existing.corrected_by = prof.id
+
+    # 3. Auto-derive: every enrolled student whose status is still pending gets
+    #    a final status from the two timestamps. No record at all → absent.
+    #    This is the "no pending after close" policy — 미인증/대기 학생은 마감
+    #    시 타임스탬프 기준으로 확정된다.
+    for sid in enrolled_set:
         r = rec_by_student.get(sid)
         if r is None:
             # No record at all → create an absent one.
-            db.add(
-                Attendance(
-                    session_id=id,
-                    student_id=sid,
-                    device_uuid=f"delta:{sid}",
-                    status="absent",
-                    corrected_by=prof.id,
-                )
+            new_rec = Attendance(
+                session_id=id,
+                student_id=sid,
+                device_uuid=f"delta:{sid}",
+                status="absent",
+                corrected_by=prof.id,
             )
+            db.add(new_rec)
+            rec_by_student[sid] = new_rec
         elif r.status == "pending":
             if r.check_in_verified_at and r.check_out_verified_at:
                 r.status = "present"
@@ -309,6 +312,13 @@ async def batch_close_attendance(
                 r.status = "absent"
             r.corrected_by = prof.id
     await db.commit()
+    # Notify the professor's session SSE stream that the aggregate changed.
+    # Also notify each enrolled student's risk stream (their absence count may
+    # have changed via the close-derived status). Best-effort.
+    await notify_session_changed(id)
+    for sid in enrolled:
+        await notify_student_changed(sid)
+    await invalidate_course_matrix(session.course_id)
     return await build_aggregate(db, id)
 
 
@@ -328,11 +338,17 @@ async def correct_attendance(
     ).scalar_one_or_none()
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="record not found")
-    await _load_owned_session(db, record.session_id, prof.id)
+    session = await _load_owned_session(db, record.session_id, prof.id)
     record.status = body.status.value
     record.corrected_by = prof.id
     await db.commit()
     await db.refresh(record)
+    # Notify the session SSE stream (aggregate changed) + the student's risk
+    # stream (absence count may have changed). Invalidate the course matrix
+    # cache so the next read reflects this correction. All best-effort.
+    await notify_session_changed(record.session_id)
+    await notify_student_changed(record.student_id)
+    await invalidate_course_matrix(session.course_id)
     return AttendanceRecord(
         record_id=record.id,
         session_id=record.session_id,

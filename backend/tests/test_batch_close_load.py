@@ -27,27 +27,34 @@ from tests.conftest import (
 
 @contextmanager
 def count_dml(engine):
-    """Count INSERT/UPDATE statements executed on the given async engine."""
+    """Count INSERT/UPDATE ROWS executed on the given async engine.
+
+    Uses cursor.rowcount (read after execution) so the count is correct whether
+    SQLAlchemy emits one statement per row or batches same-table inserts into a
+    single executemany call (the N+1-fix optimization) — both report the true
+    number of affected rows via rowcount.
+    """
     counts = {"insert": 0, "update": 0}
     sync_engine = engine.sync_engine
 
-    def _on_exec(conn, cursor, statement, params, context, executemany):
+    def _after_exec(conn, cursor, statement, params, context, executemany):
         head = statement.lstrip().split(" ", 1)[0].upper()
         # Only count writes against the attendance table — batchClose also
         # UPDATEs the session row (phase → closed), which is not an attendance
         # delta and must not pollute the insert/update tallies.
         if "attendance" not in statement.lower():
             return
+        n = cursor.rowcount if cursor.rowcount and cursor.rowcount > 0 else 1
         if head == "INSERT":
-            counts["insert"] += 1
+            counts["insert"] += n
         elif head == "UPDATE":
-            counts["update"] += 1
+            counts["update"] += n
 
-    event.listen(sync_engine, "before_cursor_execute", _on_exec)
+    event.listen(sync_engine, "after_cursor_execute", _after_exec)
     try:
         yield counts
     finally:
-        event.remove(sync_engine, "before_cursor_execute", _on_exec)
+        event.remove(sync_engine, "after_cursor_execute", _after_exec)
 
 
 async def _prof_course_session(client, session, n_students):

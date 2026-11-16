@@ -211,7 +211,8 @@ export function SimulationPanel() {
                 )}
               </Button>
               <Button
-                variant="outline"
+                variant="ghost"
+                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => void clean()}
                 disabled={cleaning}
               >

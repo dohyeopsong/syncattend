@@ -54,16 +54,16 @@
 
 export interface EmitterProtocol {
   sampleRate: number; // AudioContext rate; slot bins are computed from this
-  bandLowHz: number; // 18000
-  bandHighHz: number; // 20000
+  bandLowHz: number; // 17000
+  bandHighHz: number; // 18500
   toneSlots: number; // 16
   symbolMs: number; // 60
 }
 
 export const DEFAULT_PROTOCOL: EmitterProtocol = {
   sampleRate: 44100,
-  bandLowHz: 18500,
-  bandHighHz: 20000,
+  bandLowHz: 17000,
+  bandHighHz: 18500,
   toneSlots: 16,
   symbolMs: 60,
 };

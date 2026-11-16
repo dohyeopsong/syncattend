@@ -139,4 +139,72 @@ void main() {
     final s = c.read(attendanceControllerProvider);
     expect(s.phase, anyOf(VerifyPhase.done, VerifyPhase.error));
   });
+
+  group('onQrDetected context block (||)', () {
+    test('parses course · slot · week · phase without breaking auth fields',
+        () async {
+      final c = makeContainer();
+      addTearDown(c.dispose);
+      final notifier = c.read(attendanceControllerProvider.notifier);
+      await notifier.startCapture();
+      await _pump(c, (s) => s.phase == VerifyPhase.capturing);
+
+      // Auth payload + display-only context block after "||".
+      notifier.onQrDetected(
+          'sess-1|qr-abc||자료구조|월 1교시|3|1');
+
+      final s = c.read(attendanceControllerProvider);
+      // Auth fields parsed as before.
+      expect(s.sessionId, 'sess-1');
+      expect(s.qrToken, 'qr-abc');
+      // Context fields parsed for the banner.
+      expect(s.courseName, '자료구조');
+      expect(s.scheduleLabel, '월 1교시');
+      expect(s.weekNumber, 3);
+      expect(s.isCheckoutPhase, isFalse);
+    });
+
+    test('phaseCode 2 → check_out phase', () async {
+      final c = makeContainer();
+      addTearDown(c.dispose);
+      final notifier = c.read(attendanceControllerProvider.notifier);
+      await notifier.startCapture();
+      await _pump(c, (s) => s.phase == VerifyPhase.capturing);
+
+      notifier.onQrDetected('sess-1|qr-abc||자료구조|화 2~3교시|5|2');
+      final s = c.read(attendanceControllerProvider);
+      expect(s.isCheckoutPhase, isTrue);
+    });
+
+    test('legacy QR without context block still authenticates', () async {
+      final c = makeContainer();
+      addTearDown(c.dispose);
+      final notifier = c.read(attendanceControllerProvider.notifier);
+      await notifier.startCapture();
+      await _pump(c, (s) => s.phase == VerifyPhase.capturing);
+
+      notifier.onQrDetected('session-123|qr-token-abc');
+      final s = c.read(attendanceControllerProvider);
+      expect(s.sessionId, 'session-123');
+      expect(s.qrToken, 'qr-token-abc');
+      expect(s.hasContext, isFalse);
+      expect(s.courseName, isNull);
+    });
+
+    test('empty context fields are tolerated (ad-hoc session)', () async {
+      final c = makeContainer();
+      addTearDown(c.dispose);
+      final notifier = c.read(attendanceControllerProvider.notifier);
+      await notifier.startCapture();
+      await _pump(c, (s) => s.phase == VerifyPhase.capturing);
+
+      // No schedule label, no week → only course + phase survive.
+      notifier.onQrDetected('sess-1|qr-abc||운영체제|||1');
+      final s = c.read(attendanceControllerProvider);
+      expect(s.courseName, '운영체제');
+      expect(s.scheduleLabel, isNull);
+      expect(s.weekNumber, isNull);
+      expect(s.hasContext, isTrue);
+    });
+  });
 }

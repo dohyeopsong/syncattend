@@ -6,16 +6,14 @@ operationIds: sseStudent, sseSession.
 - sseStudent: pushes RiskWarning events for a student (absence-based risk).
 - sseSession: pushes AttendanceAggregate snapshots for a professor's live view.
 
-Streams poll the DB at a small interval; production could switch to Redis
-pub/sub, but the contract (text/event-stream of the given schema) is unchanged.
-
-The per-stream event generators are module-level async generators so they can
-be unit-tested directly (pull one event) without going through an HTTP client,
-which cannot incrementally read an infinite stream via in-process transports.
+Streams wake on Redis pub/sub notifications (published by verify / batchClose /
+correct) instead of polling the DB on a fixed timer. A fallback re-check fires
+only if no notification arrives within the fallback window, so a missed publish
+can't freeze the stream. The contract (text/event-stream of the given schema)
+is unchanged.
 """
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncGenerator
 
 from fastapi import APIRouter, Depends
@@ -29,18 +27,24 @@ from app.deps import (
     require_professor_for_sse,
 )
 from app.services.aggregate import absence_count, build_aggregate, risk_warning_for
+from app.services.events import (
+    session_channel,
+    student_channel,
+    wait_for_change,
+)
 
 router = APIRouter(prefix="/sse", tags=["sse"])
 
-_POLL_SECONDS = 2.0
-
 
 async def student_risk_events(
-    db: AsyncSession, student_id: str, poll_seconds: float = _POLL_SECONDS
+    db: AsyncSession, student_id: str
 ) -> AsyncGenerator[dict, None]:
     """Yield a 'risk' SSE event whenever the student's absence count changes
-    into a warning/danger band. Emits an immediate first event on change."""
+    into a warning/danger band. Emits an immediate first event, then blocks on
+    a Redis pub/sub notification (published by verify / correct / batchClose)
+    instead of polling the DB every 2 seconds."""
     last_absences = -1
+    # First event: emit immediately so the client sees the current state.
     while True:
         absences = await absence_count(db, student_id)
         if absences != last_absences:
@@ -48,14 +52,18 @@ async def student_risk_events(
             warning = risk_warning_for(absences)
             if warning is not None:
                 yield {"event": "risk", "data": warning.model_dump_json()}
-        await asyncio.sleep(poll_seconds)
+        # Block until a change notification arrives (or the fallback timer
+        # fires). This replaces the old `await asyncio.sleep(2)` DB poll.
+        await wait_for_change(student_channel(student_id))
 
 
 async def session_attendance_events(
-    db: AsyncSession, session_id: str, poll_seconds: float = _POLL_SECONDS
+    db: AsyncSession, session_id: str
 ) -> AsyncGenerator[dict, None]:
     """Yield an 'attendance' SSE event with the current AttendanceAggregate
-    whenever it changes. Emits an immediate first snapshot."""
+    whenever it changes. Emits an immediate first snapshot, then blocks on a
+    Redis pub/sub notification (published by verify / batchClose / correct)
+    instead of polling the DB every 2 seconds."""
     last_payload: str | None = None
     while True:
         agg = await build_aggregate(db, session_id)
@@ -63,7 +71,8 @@ async def session_attendance_events(
         if payload != last_payload:
             last_payload = payload
             yield {"event": "attendance", "data": payload}
-        await asyncio.sleep(poll_seconds)
+        # Block until a change notification arrives (or the fallback timer).
+        await wait_for_change(session_channel(session_id))
 
 
 @router.get("/students/{id}", operation_id="sseStudent")
