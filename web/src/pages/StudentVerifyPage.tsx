@@ -18,14 +18,58 @@ import {
   QrCode,
   Mic,
   CheckCircle2,
-  XCircle,
   Loader2,
   RefreshCw,
   LogOut,
   Radio,
   AlertTriangle,
   Home,
+  TimerOff,
+  Link2Off,
+  Repeat,
+  Smartphone,
+  Copy,
+  Clock,
+  ShieldCheck,
+  Ear,
+  ShieldAlert,
+  Info,
 } from "lucide-react";
+import type { VerifyReason } from "@/api/types";
+
+// Per-reason messaging for the 5 server rejection reasons. Mirrors the Flutter
+// attendance_verify_screen.dart helpers (verifyReasonMessage / Icon / guidance).
+const REASON_META: Record<
+  Exclude<VerifyReason, "not_enrolled">,
+  { label: string; Icon: typeof Info; guidance: string }
+> = {
+  window_closed: {
+    label: "인증 창 종료",
+    Icon: TimerOff,
+    guidance: "교수님께 인증 창을 다시 열어달라고 요청한 뒤 재인증하세요.",
+  },
+  cross_verify_failed: {
+    label: "QR×음향 교차검증 실패",
+    Icon: Link2Off,
+    guidance:
+      "QR과 음향이 같은 강의실 것인지 확인하고, 스피커 근처에서 다시 시도하세요.",
+  },
+  nonce_reused: {
+    label: "토큰 재사용 감지",
+    Icon: Repeat,
+    guidance: "최신 QR을 다시 스캔하세요. 이전 화면 캡처는 사용할 수 없습니다.",
+  },
+  device_mismatch: {
+    label: "기기 UUID 불일치",
+    Icon: Smartphone,
+    guidance: "기기 변경 재인증(@wku.ac.kr)이 필요할 수 있습니다.",
+  },
+  duplicate_attendance: {
+    label: "중복 출석",
+    Icon: Copy,
+    guidance: "이미 출석 처리된 세션입니다. 출결 이력에서 확인하세요.",
+  },
+};
 
 // Student attendance verification page (browser).
 //
@@ -50,6 +94,8 @@ export function StudentVerifyPage() {
     scheduleLabel,
     weekNumber,
     isCheckoutPhase,
+    qrToken,
+    audioNonce,
     deviceError,
   } = s;
 
@@ -64,8 +110,6 @@ export function StudentVerifyPage() {
   const [audioLevel, setAudioLevel] = useState<number>(0); // diagnostic 0..1
 
   // ---- QR scanning loop ----------------------------------------------------
-  // Draw the camera frame to a hidden canvas, read the pixels, and run jsQR.
-  // jsQR is pure JS so it works on every browser (Safari has no BarcodeDetector).
   function scanFrame() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -88,9 +132,7 @@ export function StudentVerifyPage() {
     }
     ctx.drawImage(video, 0, 0, w, h);
     const imageData = ctx.getImageData(0, 0, w, h);
-    const code = jsQR(imageData.data, w, h, {
-      inversionAttempts: "dontInvert",
-    });
+    const code = jsQR(imageData.data, w, h, { inversionAttempts: "dontInvert" });
     if (code && code.data) {
       useStudentAttendanceStore.getState().setQr(code.data);
     }
@@ -109,18 +151,13 @@ export function StudentVerifyPage() {
   }, [phase]);
 
   // ---- Start capture (user gesture) ---------------------------------------
-  // MUST be called from a click — Safari only grants camera + mic inside a
-  // gesture handler. Opens both media streams, starts the QR scan loop, and
-  // starts the ultrasonic decoder.
   async function startCapture() {
     setCameraError(null);
     setMicError(null);
     useStudentAttendanceStore.getState().startCapture();
-
-    // Ensure a device UUID exists (generates + persists on first call).
     getOrCreateDeviceUuid();
 
-    // 1) Camera (rear-facing on mobile — facingMode: environment).
+    // 1) Camera (rear-facing on mobile).
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: "environment" },
@@ -143,7 +180,6 @@ export function StudentVerifyPage() {
       const mic = new MicCaptureService();
       micRef.current = mic;
       mic.onSlot = (slot) => {
-        // crude diagnostic: any non-null slot = ultrasonic energy detected.
         setAudioLevel(slot !== null ? 1 : 0);
       };
       await mic.start((nonce) => {
@@ -165,7 +201,6 @@ export function StudentVerifyPage() {
     };
   }, []);
 
-  // Stop media when leaving the capturing phase (submit / done / error).
   useEffect(() => {
     if (phase === "capturing") return;
     if (rafRef.current) {
@@ -218,7 +253,7 @@ export function StudentVerifyPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Session context banner (display-only, parsed from QR) */}
+          {/* Session context banner */}
           {(courseName || scheduleLabel || weekNumber) && (
             <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm">
               <div className="font-medium text-foreground">
@@ -245,6 +280,17 @@ export function StudentVerifyPage() {
             <PhaseIndicator label="2차 (종료)" done={checkOutDone} />
           </div>
 
+          {/* ── 3계층 방어 시각화 (capturing 중에만) ── */}
+          {phase === "capturing" && (
+            <DefenseSteps
+              qrDone={!!qrToken}
+              audioDone={!!audioNonce}
+              serverActive={false}
+              serverDone={false}
+              audioPulse={audioLevel > 0}
+            />
+          )}
+
           {phase === "idle" && (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">
@@ -262,8 +308,6 @@ export function StudentVerifyPage() {
 
           {phase === "capturing" && (
             <div className="space-y-3">
-              {/* Hidden video + canvas for QR scanning. The video is mirrored
-                  into a small preview so the student can aim at the QR. */}
               <div className="relative overflow-hidden rounded-xl border bg-black">
                 <video
                   ref={videoRef}
@@ -311,49 +355,39 @@ export function StudentVerifyPage() {
           {phase === "submitting" && (
             <div className="flex flex-col items-center gap-3 py-8">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
-              <p className="text-sm text-muted-foreground">인증 확인 중…</p>
+              <p className="text-sm text-muted-foreground">서버 검증 중…</p>
             </div>
           )}
 
-          {phase === "done" && (
+          {/* ── 결과 패널 (앱 수준으로 보강) ── */}
+          {phase === "done" && result && (
             <div className="space-y-4">
+              <ResultDetail
+                status={result.status}
+                reason={result.reason}
+                checkPhase={result.check_phase}
+                riskWarning={result.risk_warning?.message ?? null}
+                checkInDone={checkInDone}
+                checkOutDone={checkOutDone}
+              />
+
+              <p className="text-center text-xs text-muted-foreground">
+                실패는 결석이 아닙니다 — 교수님이 창을 연장하거나 확인할 수 있습니다.
+              </p>
+
               {isVerified ? (
-                <div className="flex flex-col items-center gap-2 py-4 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-success/10 text-success">
-                    <CheckCircle2 className="h-8 w-8" />
-                  </div>
-                  <p className="text-lg font-semibold">
-                    {result?.check_phase === "check_out"
-                      ? "2차 인증 성공"
-                      : "1차 인증 성공"}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {checkInDone && checkOutDone
-                      ? "이중 인증이 완료되었습니다."
-                      : checkInDone
-                        ? "시작 인증이 완료되었습니다. 수업 종료 후 2차 인증을 진행하세요."
-                        : "종료 인증이 완료되었습니다."}
-                  </p>
-                </div>
+                <Button className="w-full" onClick={goHome}>
+                  확인
+                </Button>
               ) : (
-                <div className="flex flex-col items-center gap-2 py-4 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-full bg-destructive/10 text-destructive">
-                    <XCircle className="h-8 w-8" />
-                  </div>
-                  <p className="text-lg font-semibold">인증 실패</p>
-                  <p className="text-sm text-muted-foreground">
-                    {result?.reason ?? "인증에 실패했습니다."}
-                  </p>
-                </div>
+                <Button
+                  variant="default"
+                  className="w-full bg-amber-500 hover:bg-amber-600"
+                  onClick={() => useStudentAttendanceStore.getState().restart()}
+                >
+                  <RefreshCw className="h-4 w-4" /> 다시 시도
+                </Button>
               )}
-              <Button
-                className="w-full"
-                onClick={() => {
-                  useStudentAttendanceStore.getState().restart();
-                }}
-              >
-                <RefreshCw className="h-4 w-4" /> 다시 인증
-              </Button>
             </div>
           )}
 
@@ -363,8 +397,12 @@ export function StudentVerifyPage() {
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error ?? "오류가 발생했습니다."}</span>
               </div>
+              <p className="text-center text-xs text-muted-foreground">
+                실패는 결석이 아닙니다 — 다시 시도하거나 교수님께 확인을 요청하세요.
+              </p>
               <Button
-                className="w-full"
+                variant="default"
+                className="w-full bg-amber-500 hover:bg-amber-600"
                 onClick={() => useStudentAttendanceStore.getState().restart()}
               >
                 <RefreshCw className="h-4 w-4" /> 다시 시도
@@ -373,6 +411,187 @@ export function StudentVerifyPage() {
           )}
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ── 3계층 방어 시각화: QR 인식 → 음향 수신 → 서버 검증 ──
+// Mirrors the Flutter _DefenseSteps widget. Each step is a numbered node
+// (done → green check, active → indigo/pulsing, idle → gray).
+function DefenseSteps({
+  qrDone,
+  audioDone,
+  serverActive,
+  serverDone,
+  audioPulse,
+}: {
+  qrDone: boolean;
+  audioDone: boolean;
+  serverActive: boolean;
+  serverDone: boolean;
+  audioPulse: boolean;
+}) {
+  const steps = [
+    {
+      index: 1,
+      label: "QR 인식",
+      Icon: QrCode,
+      done: qrDone,
+      active: !qrDone,
+      pulse: false,
+    },
+    {
+      index: 2,
+      label: "음향 수신",
+      Icon: Ear,
+      done: audioDone,
+      active: qrDone && !audioDone,
+      pulse: audioPulse && !audioDone,
+    },
+    {
+      index: 3,
+      label: "서버 검증",
+      Icon: ShieldCheck,
+      done: serverDone,
+      active: serverActive,
+      pulse: false,
+    },
+  ];
+  return (
+    <div className="rounded-xl border border-border/70 bg-card p-3.5">
+      <div className="mb-3 flex items-center gap-1.5">
+        <ShieldAlert className="h-4 w-4 text-primary" />
+        <span className="text-sm font-bold">3계층 방어</span>
+      </div>
+      <div className="flex items-start">
+        {steps.map((step, i) => {
+          const color = step.done
+            ? "text-emerald-600 dark:text-emerald-400"
+            : step.active
+              ? "text-primary"
+              : "text-muted-foreground";
+          const bg = step.done
+            ? "bg-emerald-500/10 border-emerald-500/40"
+            : step.active
+              ? "bg-primary/10 border-primary/40"
+              : "bg-muted border-border";
+          return (
+            <div key={step.index} className="flex flex-1 items-start">
+              <div className="flex w-16 flex-col items-center gap-1.5">
+                <div
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border-2 ${bg} ${step.pulse ? "animate-pulse" : ""}`}
+                >
+                  {step.done ? (
+                    <CheckCircle2 className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <step.Icon className={`h-4 w-4 ${color}`} />
+                  )}
+                </div>
+                <span
+                  className={`text-xs ${step.done || step.active ? "font-semibold text-foreground" : "text-muted-foreground"}`}
+                >
+                  {step.label}
+                </span>
+              </div>
+              {i < steps.length - 1 && (
+                <div
+                  className={`mt-4 h-0.5 flex-1 rounded-full ${step.done ? "bg-emerald-500" : "bg-border"}`}
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── 결과 상세 패널 ──
+// Mirrors the Flutter _ResultDetail: status headline + per-reason icon +
+// actionable guidance in an amber card. present=green, pending/rejected=amber.
+function ResultDetail({
+  status,
+  reason,
+  checkPhase,
+  riskWarning,
+  checkInDone,
+  checkOutDone,
+}: {
+  status: "verified" | "pending" | "rejected" | "unknown";
+  reason: VerifyReason | null;
+  checkPhase: "check_in" | "check_out" | null;
+  riskWarning: string | null;
+  checkInDone: boolean;
+  checkOutDone: boolean;
+}) {
+  const present = status === "verified";
+  const pending = status === "pending";
+  const rejected = status === "rejected";
+  const color = present ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400";
+
+  const headline =
+    status === "verified"
+      ? checkPhase === "check_out"
+        ? "2차 인증 성공"
+        : checkPhase === "check_in"
+          ? "1차 인증 성공"
+          : "인증 성공"
+      : status === "pending"
+        ? "대기 중 (교수 확인 필요)"
+        : status === "rejected"
+          ? `거부됨: ${reason && reason in REASON_META ? REASON_META[reason as Exclude<VerifyReason, "not_enrolled">].label : ""}`
+          : "알 수 없는 상태";
+
+  const StatusIcon = present ? CheckCircle2 : pending ? Clock : AlertTriangle;
+  const reasonMeta =
+    rejected && reason && reason !== "not_enrolled" && reason in REASON_META
+      ? REASON_META[reason as Exclude<VerifyReason, "not_enrolled">]
+      : null;
+
+  return (
+    <div className="space-y-3">
+      {/* Headline */}
+      <div className="flex items-center justify-center gap-2">
+        <StatusIcon className={`h-5 w-5 ${color}`} />
+        <span className={`text-base font-semibold ${color}`}>{headline}</span>
+      </div>
+
+      {/* Verified sub-message */}
+      {present && (
+        <p className="text-center text-sm text-muted-foreground">
+          {checkInDone && checkOutDone
+            ? "이중 인증이 완료되었습니다."
+            : checkInDone
+              ? "시작 인증이 완료되었습니다. 수업 종료 후 2차 인증을 진행하세요."
+              : checkOutDone
+                ? "종료 인증이 완료되었습니다."
+                : "인증이 완료되었습니다."}
+        </p>
+      )}
+
+      {/* Rejected: per-reason guidance card */}
+      {reasonMeta && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3">
+          <reasonMeta.Icon className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-xs leading-relaxed text-foreground">
+            {reasonMeta.guidance}
+          </p>
+        </div>
+      )}
+
+      {/* device_mismatch extra hint (even when not the primary reason) */}
+      {reason === "device_mismatch" && !reasonMeta && (
+        <p className="text-xs text-muted-foreground">
+          기기 변경 재인증(@wku.ac.kr)이 필요할 수 있습니다.
+        </p>
+      )}
+
+      {/* Risk warning */}
+      {riskWarning && (
+        <p className="text-sm text-amber-600 dark:text-amber-400">
+          위험 경고: {riskWarning}
+        </p>
+      )}
     </div>
   );
 }
