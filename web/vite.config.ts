@@ -1,18 +1,48 @@
+
 /// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath, URL } from "node:url";
+import { VitePWA } from "vite-plugin-pwa";
 
-// Dev server on :5173; proxy /api to the FastAPI backend (:8000).
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      manifest: {
+        name: "캡스톤 출석 시스템",
+        short_name: "출석체크",
+        description: "특정 주파수를 이용한 출석 시스템",
+        theme_color: "#ffffff",
+        background_color: "#ffffff",
+        display: "standalone",
+        start_url: "/",
+        icons: [
+          {
+            src: "/pwa-192x192.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+          {
+            src: "/pwa-512x512.png",
+            sizes: "512x512",
+            type: "image/png",
+          },
+        ],
+      },
+    }),
+  ],
+
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
+
   server: {
     port: 5173,
+    allowedHosts: ["feminine-neatness-coliseum.ngrok-free.dev"],
     proxy: {
       "/api": {
         target: "http://localhost:8000",
@@ -21,8 +51,7 @@ export default defineConfig({
       },
     },
   },
-  // Vitest: default env is node (keeps the jsdom-less client/store tests intact);
-  // component tests opt into jsdom per-file via `// @vitest-environment jsdom`.
+
   test: {
     globals: true,
     environment: "node",

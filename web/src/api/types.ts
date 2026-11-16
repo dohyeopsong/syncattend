@@ -159,7 +159,48 @@ export interface VerifyResult {
   device_matched: boolean;
   reason: VerifyReason | null;
   check_phase: CheckPhase | null; // set on success, null on rejection
+  // Whether the student's attendance row has the 1차/2차 timestamp set after
+  // this verify. The student UI shows 1차/2차 completion from these.
+  check_in_done?: boolean;
+  check_out_done?: boolean;
   risk_warning?: { level: "info" | "warning" | "danger"; absences: number; message: string } | null;
+}
+
+export interface VerifyRequest {
+  session_id: string;
+  qr_token: string;
+  audio_nonce: string;
+  device_uuid: string;
+}
+
+// Authenticated user profile (GET /auth/me). Lets the student client resolve
+// its account id (for SSE) from the access token alone.
+export interface UserOut {
+  id: string;
+  email: string;
+  role: Role;
+  name: string | null;
+  student_id: string | null;
+}
+
+// Device binding result (POST /devices/register).
+export interface DeviceBinding {
+  account_id: string;
+  device_uuid: string;
+  bound_at: string;
+}
+
+// One row of the student's own attendance history (GET /me/attendance).
+export interface MyAttendanceItem {
+  record_id: string;
+  session_id: string;
+  course_id: string;
+  course_name: string;
+  week_number: number | null;
+  status: AttendanceStatus;
+  check_in_verified_at: string | null;
+  check_out_verified_at: string | null;
+  session_opened_at: string | null;
 }
 
 export interface AttendanceRecord {

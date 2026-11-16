@@ -26,7 +26,7 @@ export function LoginPage() {
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
     const ok = await login(email, password);
-    if (ok) navigate("/", { replace: true });
+    if (ok) navigate("/dashboard", { replace: true });
   }
 
   return (

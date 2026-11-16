@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://sdas:sdas@localhost:5432/sdas"
     redis_url: str = "redis://localhost:6379/0"
 
+    # CORS: comma-separated list of allowed web origins. In dev only the Vite
+    # server (:5173) is allowed; on Render set CORS_ORIGINS to the Vercel URL(s).
+    cors_origins: list[str] = ["http://localhost:5173"]
+
     # Auth / identity-defense parameters (contract-aligned)
     jwt_secret: str = "dev-only-change-me"
     jwt_algorithm: str = "HS256"

@@ -186,18 +186,21 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials"
         )
     # Client gating: the web dashboard is professor-only and the mobile app is
-    # student-only. The client declares itself via X-Client-Type (web|mobile);
-    # a mismatch (e.g. a student logging into the web) is rejected here so the
-    # check cannot be bypassed by calling the API directly without the UI guard.
+    # student-only. The client declares itself via X-Client-Type (web|mobile|
+    # student-web); a mismatch (e.g. a student logging into the web) is rejected
+    # here so the check cannot be bypassed by calling the API directly without
+    # the UI guard. "student-web" lets students authenticate from a browser
+    # (e.g. iPhone Safari) without installing the Flutter app — same student-only
+    # gate as "mobile", just a different transport.
     if client_type == "web" and user.role != Role.professor.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="교수 계정만 웹 대시보드에 로그인할 수 있습니다.",
         )
-    if client_type == "mobile" and user.role != Role.student.value:
+    if client_type in ("mobile", "student-web") and user.role != Role.student.value:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="학생 계정만 모바일 앱에 로그인할 수 있습니다.",
+            detail="학생 계정만 학생 웹에 로그인할 수 있습니다.",
         )
     return TokenPair(
         access_token=create_access_token(user.id, user.role),

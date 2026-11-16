@@ -13,6 +13,7 @@ import type {
   CreateCourseRequest,
   Enrollment,
   LoginRequest,
+  MyAttendanceItem,
   RefreshRequest,
   Session,
   SessionEstimate,
@@ -23,6 +24,10 @@ import type {
   SimulationResult,
   TokenPair,
   UpdateCourseRequest,
+  UserOut,
+  VerifyRequest,
+  VerifyResult,
+  DeviceBinding,
 } from "./types";
 
 const BASE = "/api";
@@ -136,6 +141,17 @@ export function login(payload: LoginRequest): Promise<TokenPair> {
   return request<TokenPair>("/auth/login", {
     method: "POST",
     headers: { "X-Client-Type": "web" },
+    body: JSON.stringify(payload),
+  });
+}
+
+// Student browser login (iPhone Safari etc.). Same student-only gate as the
+// mobile app, just transported over a browser session instead of the Flutter
+// app — lets a student authenticate without installing anything.
+export function loginStudent(payload: LoginRequest): Promise<TokenPair> {
+  return request<TokenPair>("/auth/login", {
+    method: "POST",
+    headers: { "X-Client-Type": "student-web" },
     body: JSON.stringify(payload),
   });
 }
@@ -375,4 +391,33 @@ export function correctAttendance(
 export function sseSessionUrl(sessionId: string): string {
   const q = accessToken ? `?access_token=${encodeURIComponent(accessToken)}` : "";
   return `${BASE}/sse/sessions/${encodeURIComponent(sessionId)}${q}`;
+}
+
+// ------------------------------------------------------ student (browser)
+// The student browser auth path mirrors the Flutter app: register a device UUID
+// (stored in localStorage for the browser — weaker than Keychain/Keystore, but
+// the @wku.ac.kr re-registration gate still applies), then verify attendance
+// with the QR token + decoded ultrasonic nonce.
+export function getMe(): Promise<UserOut> {
+  return request<UserOut>("/auth/me");
+}
+
+export function registerDevice(deviceUuid: string): Promise<DeviceBinding> {
+  return request<DeviceBinding>("/devices/register", {
+    method: "POST",
+    body: JSON.stringify({ device_uuid: deviceUuid }),
+  });
+}
+
+export function verifyAttendance(
+  payload: VerifyRequest,
+): Promise<VerifyResult> {
+  return request<VerifyResult>("/attendance/verify", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getMyAttendance(): Promise<MyAttendanceItem[]> {
+  return request<MyAttendanceItem[]>("/me/attendance");
 }

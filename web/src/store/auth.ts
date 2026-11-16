@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   login as apiLogin,
+  loginStudent as apiLoginStudent,
   refreshTokenApi,
   setAccessToken,
   setRefreshHandler,
@@ -8,6 +9,63 @@ import {
 import type { Role } from "@/api/types";
 
 const STORAGE_KEY = "syncattend.auth";
+
+type SetFn = (
+  partial:
+    | Partial<AuthState>
+    | ((state: AuthState) => Partial<AuthState>),
+) => void;
+
+/** Shared login path for professor (web) and student (student-web) clients.
+ *  The backend gates by X-Client-Type; we double-check the returned role so a
+ *  mismatched token is never persisted. */
+async function _doLogin(
+  set: SetFn,
+  email: string,
+  password: string,
+  expectedRole: Role,
+  clientType: "web" | "student-web",
+): Promise<boolean> {
+  set({ status: "loading", error: null, sessionExpired: false });
+  try {
+    const tokens =
+      clientType === "student-web"
+        ? await apiLoginStudent({ email, password })
+        : await apiLogin({ email, password });
+    if (tokens.role !== expectedRole) {
+      setAccessToken(null);
+      set({
+        status: "error",
+        error:
+          expectedRole === "professor"
+            ? "교수 계정만 웹 대시보드에 로그인할 수 있습니다."
+            : "학생 계정만 학생 웹에 로그인할 수 있습니다.",
+        sessionExpired: false,
+      });
+      return false;
+    }
+    setAccessToken(tokens.access_token);
+    const persisted: PersistedAuth = {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      role: tokens.role,
+      email,
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
+    set({
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      role: tokens.role,
+      email,
+      status: "idle",
+      sessionExpired: false,
+    });
+    return true;
+  } catch (e) {
+    set({ status: "error", error: e instanceof Error ? e.message : String(e) });
+    return false;
+  }
+}
 
 interface PersistedAuth {
   accessToken: string;
@@ -36,7 +94,11 @@ interface AuthState {
   /** Set when the access token expired and refresh also failed — the UI shows a
    * re-login banner and the next call will redirect to /login. */
   sessionExpired: boolean;
+  /** Professor dashboard login (X-Client-Type: web). Professor-only. */
   login: (email: string, password: string) => Promise<boolean>;
+  /** Student browser login (X-Client-Type: student-web). Student-only — lets a
+   *  student authenticate from a browser (e.g. iPhone Safari) without the app. */
+  loginStudent: (email: string, password: string) => Promise<boolean>;
   logout: () => void;
   hydrate: () => void;
   /** Called by the API client after a 401 + failed refresh. */
@@ -57,8 +119,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hydrate: () => {
     const persisted = loadPersisted();
     if (persisted) {
-      // Refuse to restore a non-professor session on the web dashboard.
-      if (persisted.role !== "professor") {
+      // Restore either a professor (dashboard) or student (browser auth)
+      // session. Other roles are refused and cleared.
+      if (persisted.role !== "professor" && persisted.role !== "student") {
         localStorage.removeItem(STORAGE_KEY);
       } else {
         setAccessToken(persisted.accessToken);
@@ -119,44 +182,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     });
   },
 
-  login: async (email, password) => {
-    set({ status: "loading", error: null, sessionExpired: false });
-    try {
-      const tokens = await apiLogin({ email, password });
-      // Web dashboard is professor-only. The backend also enforces this via the
-      // X-Client-Type header, but guard here too so a non-professor token never
-      // gets persisted even if the header check were bypassed.
-      if (tokens.role !== "professor") {
-        setAccessToken(null);
-        set({
-          status: "error",
-          error: "교수 계정만 웹 대시보드에 로그인할 수 있습니다.",
-          sessionExpired: false,
-        });
-        return false;
-      }
-      setAccessToken(tokens.access_token);
-      const persisted: PersistedAuth = {
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        role: tokens.role,
-        email,
-      };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persisted));
-      set({
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        role: tokens.role,
-        email,
-        status: "idle",
-        sessionExpired: false,
-      });
-      return true;
-    } catch (e) {
-      set({ status: "error", error: e instanceof Error ? e.message : String(e) });
-      return false;
-    }
-  },
+  login: async (email, password) =>
+    _doLogin(set, email, password, "professor", "web"),
+
+  loginStudent: async (email, password) =>
+    _doLogin(set, email, password, "student", "student-web"),
 
   logout: () => {
     setAccessToken(null);
