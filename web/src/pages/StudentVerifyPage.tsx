@@ -24,6 +24,7 @@ import {
   LogOut,
   Radio,
   AlertTriangle,
+  Home,
 } from "lucide-react";
 
 // Student attendance verification page (browser).
@@ -185,6 +186,14 @@ export function StudentVerifyPage() {
     navigate("/student/login", { replace: true });
   }
 
+  function goHome() {
+    if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
+    void micRef.current?.stop();
+    useStudentAttendanceStore.getState().reset();
+    navigate("/student", { replace: true });
+  }
+
   const isVerified = result?.status === "verified";
 
   return (
@@ -195,9 +204,14 @@ export function StudentVerifyPage() {
             <CardTitle className="flex items-center gap-2 text-lg">
               <Radio className="h-5 w-5 text-primary" /> 학생 출결 인증
             </CardTitle>
-            <Button variant="ghost" size="sm" onClick={onLogout}>
-              <LogOut className="h-4 w-4" /> 로그아웃
-            </Button>
+            <div className="flex gap-1">
+              <Button variant="ghost" size="sm" onClick={goHome}>
+                <Home className="h-4 w-4" /> 홈
+              </Button>
+              <Button variant="ghost" size="sm" onClick={onLogout}>
+                <LogOut className="h-4 w-4" /> 로그아웃
+              </Button>
+            </div>
           </div>
           <CardDescription className="truncate">
             {email ?? "학생"}

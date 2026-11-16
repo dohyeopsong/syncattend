@@ -4,6 +4,8 @@ import { useAuthStore } from "@/store/auth";
 import { RoleSelectPage } from "@/pages/RoleSelectPage";
 import { LoginPage } from "@/pages/LoginPage";
 import { StudentLoginPage } from "@/pages/StudentLoginPage";
+import { StudentSignupPage } from "@/pages/student/StudentSignupPage";
+import { StudentHomePage } from "@/pages/student/StudentHomePage";
 import { StudentVerifyPage } from "@/pages/StudentVerifyPage";
 import { DashboardPage } from "@/pages/DashboardPage";
 
@@ -43,6 +45,7 @@ export function App() {
       {/* Login pages (each sends the matching X-Client-Type). */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/student/login" element={<StudentLoginPage />} />
+      <Route path="/student/signup" element={<StudentSignupPage />} />
       {/* Authenticated areas. */}
       <Route
         path="/dashboard"
@@ -56,6 +59,16 @@ export function App() {
       />
       <Route
         path="/student"
+        element={
+          <RequireAuth>
+            <RequireStudent>
+              <StudentHomePage />
+            </RequireStudent>
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/student/verify"
         element={
           <RequireAuth>
             <RequireStudent>

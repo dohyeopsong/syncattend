@@ -99,6 +99,13 @@ export function StudentLoginPage() {
                 "로그인"
               )}
             </Button>
+            <button
+              type="button"
+              onClick={() => navigate("/student/signup")}
+              className="w-full text-center text-sm text-muted-foreground hover:text-foreground"
+            >
+              계정이 없으신가요? 회원가입
+            </button>
           </form>
         </CardContent>
       </Card>

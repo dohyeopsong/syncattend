@@ -313,3 +313,53 @@ export interface ApiError {
   detail?: string;
   code?: string;
 }
+
+// -------------------------------------------------------- student auth (web)
+// Signup + device re-registration payloads mirroring the contract schemas.
+export interface SendCodeRequest {
+  email: string;
+}
+
+export interface VerifyCodeRequest {
+  email: string;
+  code: string;
+}
+
+export interface VerifyCodeResult {
+  verified: boolean;
+  message: string;
+}
+
+export interface RegisterUserRequest {
+  email: string;
+  password: string;
+  role: Role;
+  name?: string | null;
+  student_id?: string | null;
+}
+
+// A course the calling student is enrolled in (GET /me/courses). Same shape as
+// CourseCatalogItem but without the `enrolled` flag.
+export interface MyCourseItem {
+  id: string;
+  professor_id: string;
+  name: string;
+  code: string | null;
+  department: string | null;
+  professor_name: string | null;
+  day_of_week: DayOfWeek | null;
+  start_period: number | null;
+  end_period: number | null;
+  location: string | null;
+  credits: number | null;
+  schedules: CourseScheduleSlot[];
+}
+
+// Risk-warning SSE payload (GET /sse/students/{id}).
+export type RiskLevel = "info" | "warning" | "danger";
+
+export interface RiskWarning {
+  level: RiskLevel;
+  absences: number;
+  message: string;
+}
