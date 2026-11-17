@@ -74,6 +74,8 @@ def _send_via_resend(to_email: str, subject: str, body: str) -> None:
         headers={
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "syncattend-backend/1.0",
         },
         method="POST",
     )
