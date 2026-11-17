@@ -75,9 +75,14 @@ export function TimetablePage() {
           title="수강 중인 강의가 없습니다"
           description="강좌 찾기에서 강의를 검색해 시간표에 추가해보세요."
           action={
-            <Button size="sm" onClick={() => setCatalogOpen(true)}>
+            <button
+              type="button"
+              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-haspopup="dialog"
+              onClick={() => setCatalogOpen(true)}
+            >
               <Plus className="h-4 w-4" /> 강좌 찾기
-            </Button>
+            </button>
           }
         />
         {catalogOpen && (
@@ -103,9 +108,14 @@ export function TimetablePage() {
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
-          <Button size="sm" onClick={() => setCatalogOpen(true)}>
+          <button
+            type="button"
+            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-haspopup="dialog"
+            onClick={() => setCatalogOpen(true)}
+          >
             <Plus className="h-4 w-4" /> 강좌 찾기
-          </Button>
+          </button>
         </div>
       </div>
 
