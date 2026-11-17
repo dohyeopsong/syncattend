@@ -4,7 +4,8 @@
 // course_screens.dart): columns = weekdays (Mon–Fri min, expands to Sat/Sun),
 // rows = class periods (1–9 min). Course blocks are pastel-colored with name +
 // location; conflicting courses get a warning tint. Unscheduled courses appear
-// as chips below the grid. The "+" button opens the course catalog sheet.
+// as chips below the grid. The course search button opens a centered catalog
+// modal for finding and adding courses.
 
 import { useEffect, useMemo, useState } from "react";
 import { useStudentCoursesStore } from "@/store/studentCourses";
@@ -72,10 +73,10 @@ export function TimetablePage() {
         <EmptyState
           Icon={CalendarDays}
           title="수강 중인 강의가 없습니다"
-          description="수강신청을 통해 강의를 담아보세요."
+          description="강좌 찾기에서 강의를 검색해 시간표에 추가해보세요."
           action={
             <Button size="sm" onClick={() => setCatalogOpen(true)}>
-              <Plus className="h-4 w-4" /> 수강신청
+              <Plus className="h-4 w-4" /> 강좌 찾기
             </Button>
           }
         />
@@ -103,7 +104,7 @@ export function TimetablePage() {
             <RefreshCw className="h-4 w-4" />
           </Button>
           <Button size="sm" onClick={() => setCatalogOpen(true)}>
-            <Plus className="h-4 w-4" /> 수강신청
+            <Plus className="h-4 w-4" /> 강좌 찾기
           </Button>
         </div>
       </div>

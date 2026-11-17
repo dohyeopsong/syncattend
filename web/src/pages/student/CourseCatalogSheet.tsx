@@ -7,6 +7,7 @@
 // dialog (naming the conflicting course) before hitting the server.
 
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { useStudentCoursesStore } from "@/store/studentCourses";
 import { conflictingCourses } from "@/lib/studentTimetable";
 import { Button } from "@/components/ui/button";
@@ -101,21 +102,26 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
 
   const loading = catalogStatus === "loading";
 
-  return (
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center"
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="student-course-catalog-title"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border bg-background shadow-soft-lg sm:rounded-2xl"
+        className="flex max-h-[min(760px,90vh)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-soft-lg"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b p-4">
           <div>
-            <h3 className="text-base font-semibold">수강신청</h3>
+            <h3 id="student-course-catalog-title" className="text-base font-semibold">
+              강좌 찾기
+            </h3>
             <p className="text-xs text-muted-foreground">
-              담을 강의를 검색하세요
+              강좌명, 교수명 또는 학수번호로 검색한 뒤 시간표에 추가하세요.
             </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose} aria-label="닫기">
@@ -200,7 +206,8 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
           onClose={() => setClashCourse(null)}
         />
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 

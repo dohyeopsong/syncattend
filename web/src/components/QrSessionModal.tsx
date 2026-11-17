@@ -80,7 +80,7 @@ export function QrSessionModal() {
   // 멈춘다 (이전에는 openReview()만 호출해서 세션이 계속 active 상태로 QR이
   // 돌아가고 토큰이 계속 갱신되는 문제가 있었다).
   // 세션 열기 직후 windowTick이 백엔드 값으로 동기화되기 전 잠시 0일 수 있으므로,
-  // "카운트다운 중 0에 도달"(이전 > 0 → 현재 0)할 때만 트리거한다.
+  // 남은 시간이 0에 도달한 순간(이전 > 0 → 현재 0)에만 트리거한다.
   const prevTickRef = useRef(windowTick);
   useEffect(() => {
     if (active && prevTickRef.current > 0 && windowTick <= 0) {
