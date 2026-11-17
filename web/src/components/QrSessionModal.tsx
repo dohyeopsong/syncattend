@@ -5,7 +5,6 @@ import { useCoursesStore } from "@/store/courses";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RealtimeRiskPanel } from "@/components/RealtimeRiskPanel";
-import { CountdownRing } from "@/components/ui/countdown-ring";
 import {
   UltrasonicEmitter,
   DEFAULT_PROTOCOL,
@@ -60,26 +59,6 @@ export function QrSessionModal() {
     if (emitting) setAudioUnlocked(isAudioUnlocked());
   }, [emitting]);
 
-  // ---- DISPLAY-ONLY token TTL countdown -----------------------------------
-  // The backend reuses a token for its full ~15s TTL and only rotates near
-  // expiry, so the qr_token value (rotationKey) changes once per rotation — not
-  // once per poll. Reset the countdown ONLY when the token actually rotates;
-  // between rotations the 1s tick runs it down smoothly 15→0.
-  //
-  // IMPORTANT: the ring's `total` denominator is the FIXED nonce TTL (15s),
-  // NOT token.expires_in. On a reuse poll the backend returns expires_in as the
-  // real *remaining* TTL (e.g. 6 at the 9s poll). If we fed that as `total`,
-  // the fraction would jump to remaining/remaining = 1 and the ring would snap
-  // back to full at ~6s — the "시계가 6초에서 처음부터 다시 도는" bug. Keep total
-  // constant so the arc only refills on an actual rotation (rotationKey change).
-  const NONCE_TTL = 15;
-  const rotationKey = token?.qr_token ?? token?.audio_nonce ?? "";
-  const [ttlRemaining, setTtlRemaining] = useState(NONCE_TTL);
-  useEffect(() => {
-    setTtlRemaining(NONCE_TTL);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rotationKey]);
-
   // ---- DISPLAY-ONLY auth-window countdown ---------------------------------
   const windowRemaining = session?.window_remaining ?? 0;
   const [windowTick, setWindowTick] = useState(windowRemaining);
@@ -87,11 +66,10 @@ export function QrSessionModal() {
     setWindowTick(windowRemaining);
   }, [windowRemaining, active]);
 
-  // Local 1s tick for BOTH countdowns, floored at 0. Display only.
+  // Local 1s tick for the authentication window countdown.
   useEffect(() => {
     if (!active) return;
     const id = setInterval(() => {
-      setTtlRemaining((s) => (s > 0 ? s - 1 : 0));
       setWindowTick((s) => (s > 0 ? s - 1 : 0));
     }, 1000);
     return () => clearInterval(id);
@@ -111,11 +89,7 @@ export function QrSessionModal() {
     prevTickRef.current = windowTick;
   }, [active, windowTick, close]);
 
-  // Token polling. The backend reuses a token for its full ~15s TTL and only
-  // rotates near expiry. A 3s poll detects a rotation within ~3s and pushes
-  // the new nonce to the emitter (which swaps at the next frame boundary — see
-  // emitter.update()). 15s / 3s ≈ 5 checks per token; one of those catches the
-  // rotation, then the next token's 15s cycle begins.
+  // Poll for the current token and push a newly issued token to the emitter.
   useEffect(() => {
     if (active) startTokenPolling(3000);
     else stopTokenPolling();
@@ -260,23 +234,8 @@ export function QrSessionModal() {
                 size={300}
                 includeMargin
               />
-              {/* Token rotation countdown + remaining window */}
+              {/* Authentication window countdown */}
               <div className="flex w-full max-w-md flex-col gap-2">
-                <div className="flex items-center gap-3 rounded-lg border bg-card p-3">
-                  <CountdownRing
-                    remaining={ttlRemaining}
-                    total={NONCE_TTL}
-                  />
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="text-sm font-medium">
-                      회전 QR·음향 토큰
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      {NONCE_TTL}초마다 자동 회전(단일 사용).
-                      학생은 QR과 초음파를 동시에 인증합니다.
-                    </p>
-                  </div>
-                </div>
                 <div className="flex items-center justify-between rounded-lg border p-3">
                   <span className="flex items-center gap-2 text-sm">
                     <Timer className="h-4 w-4 text-muted-foreground" />

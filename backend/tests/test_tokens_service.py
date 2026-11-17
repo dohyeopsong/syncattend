@@ -152,10 +152,15 @@ async def test_get_or_rotate_tokens_reuses_until_near_expiry(redis):
     # is still close to the full TTL.
     assert exp2 <= exp1 and exp2 > ttl - 3
 
-    # Simulate the token nearing expiry: drop its TTL so the refresh threshold
-    # trips → the next call must mint a NEW pair.
+    # A token with one second left is still reused; rotation occurs after expiry.
     await redis.expire(_qr_key(sid), 1)
     await redis.expire(_pair_key(sid, qr1), 1)
+    qr_near, audio_near, exp_near = await get_or_rotate_tokens(redis, sid)
+    assert qr_near == qr1
+    assert audio_near == audio1
+    assert exp_near > 0
+
+    await redis.delete(_qr_key(sid), _pair_key(sid, qr1))
     qr3, audio3, exp3 = await get_or_rotate_tokens(redis, sid)
     assert qr3 != qr1
     assert audio3 != audio1

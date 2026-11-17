@@ -66,22 +66,14 @@ async def issue_tokens(redis, session_id: str) -> tuple[str, str]:
     return qr, audio
 
 
-# When the current token has this many seconds (or fewer) left, the polling
-# path mints a fresh one. Kept small (well below the 15s TTL) so a token lives
-# its full ~15s and only rotates at the end — polling faster than the TTL must
-# NOT shorten the rotation period.
-_ROTATE_REFRESH_SECONDS = 3
-
-
 async def get_or_rotate_tokens(
     redis, session_id: str
 ) -> tuple[str, str, int]:
     """Return the current (qr_token, audio_nonce, expires_in) for a session.
 
-    Reuses the token already in Redis while it still has more than
-    [_ROTATE_REFRESH_SECONDS] of TTL left, so frequent polling does NOT rotate
-    the token — it lives a full ~15s and rotates only near expiry. This is the
-    function the professor dashboard's getSessionToken endpoint must call;
+    Reuses the token already in Redis until it expires, so polling does not
+    rotate the token early. This is the function the professor dashboard's
+    getSessionToken endpoint must call;
     [issue_tokens] force-rotates on every call and is for simulation/tests.
 
     `expires_in` is the REAL remaining TTL of the returned token (capped at the
@@ -94,7 +86,7 @@ async def get_or_rotate_tokens(
     if qr_raw is not None:
         qr = qr_raw if isinstance(qr_raw, str) else qr_raw.decode()
         remaining = await redis.ttl(_qr_key(session_id))
-        if remaining is not None and remaining > _ROTATE_REFRESH_SECONDS:
+        if remaining is not None and remaining > 0:
             audio_raw = await redis.get(_pair_key(session_id, qr))
             if audio_raw is not None:
                 audio = (
