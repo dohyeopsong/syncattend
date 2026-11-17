@@ -58,6 +58,19 @@ class DeviceBinding {
       );
 }
 
+class DevicePairingCode {
+  const DevicePairingCode({required this.code, required this.expiresIn});
+
+  final String code;
+  final int expiresIn;
+
+  factory DevicePairingCode.fromJson(Map<String, dynamic> json) =>
+      DevicePairingCode(
+        code: json['code'] as String? ?? '',
+        expiresIn: json['expires_in'] as int? ?? 0,
+      );
+}
+
 /// #/components/schemas/SessionToken
 class SessionToken {
   const SessionToken({

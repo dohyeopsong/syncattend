@@ -69,6 +69,39 @@ async def test_get_my_device(client, session):
     assert r.json()["device_uuid"] == u1
 
 
+async def test_device_pairing_code_returns_binding_once(client, session):
+    user = await seed_user(session, "pair@wku.ac.kr", "pw123456", "student")
+    hdr = auth_header(user.id, "student")
+    device_uuid = str(uuid.uuid4())
+    await client.post(
+        "/devices/register", json={"device_uuid": device_uuid}, headers=hdr
+    )
+
+    issued = await client.post(
+        "/devices/pairing/code",
+        json={"device_uuid": device_uuid},
+        headers=hdr,
+    )
+    assert issued.status_code == 200
+    code = issued.json()["code"]
+    assert len(code) == 6
+
+    confirmed = await client.post(
+        "/devices/pairing/confirm",
+        json={"code": code},
+        headers=hdr,
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["device_uuid"] == device_uuid
+
+    reused = await client.post(
+        "/devices/pairing/confirm",
+        json={"code": code},
+        headers=hdr,
+    )
+    assert reused.status_code == 400
+
+
 async def test_reregister_flow_rebinds(client, session):
     from app.redis_client import get_redis
 

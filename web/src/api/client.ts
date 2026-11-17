@@ -194,9 +194,9 @@ export function listCourses(): Promise<Course[]> {
   return request<Course[]>("/courses");
 }
 
-// GET /courses/catalog?q= — browsable catalog for autocomplete. The `q` search
-// param is additive; if the backend does not yet filter, callers filter
-// client-side. Encodes q only when non-empty to keep the URL clean.
+// GET /courses/catalog?q= — complete browsable catalog. The optional `q`
+// parameter remains available for callers that prefer server-side filtering;
+// the timetable loads once and filters locally for instant search.
 export function listCourseCatalog(q?: string): Promise<CourseCatalogItem[]> {
   const query = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
   return request<CourseCatalogItem[]>(`/courses/catalog${query}`);
@@ -475,6 +475,13 @@ export function registerUser(
 // token. Used by the student home bootstrap to decide register vs reauth vs ready.
 export function getMyDevice(): Promise<DeviceBinding> {
   return request<DeviceBinding>("/devices/me");
+}
+
+export function confirmDevicePairing(code: string): Promise<DeviceBinding> {
+  return request<DeviceBinding>("/devices/pairing/confirm", {
+    method: "POST",
+    body: JSON.stringify({ code }),
+  });
 }
 
 // Request a re-auth verification code to the given @wku.ac.kr email.

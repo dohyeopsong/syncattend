@@ -55,3 +55,15 @@ export function getOrCreateDeviceUuid(): string {
   cached = created;
   return created;
 }
+
+export function setDeviceUuid(uuid: string): void {
+  const normalized = uuid.trim();
+  if (!normalized) return;
+  cached = normalized;
+  try {
+    localStorage.setItem(DEVICE_UUID_KEY, normalized);
+  } catch {
+    // Keep the in-memory value when localStorage is unavailable.
+  }
+}
+

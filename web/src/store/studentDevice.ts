@@ -4,20 +4,21 @@
 // auth_controller.dart): on entering the student area, check whether this
 // device's UUID is already bound to the account via GET /devices/me:
 //   200 + uuid matches local UUID → ready
-//   404 (no binding)              → needsDeviceRegistration
 //   uuid bound to a different acct → needsReauth
+//   404 (no binding)              → needsDeviceRegistration
 //   401                           → loggedOut (token invalid)
 //   network error                 → optimistic ready (UUID exists)
 
 import { create } from "zustand";
 import {
   confirmReauth as apiConfirmReauth,
+  confirmDevicePairing as apiConfirmDevicePairing,
   getMyDevice as apiGetMyDevice,
   registerDevice as apiRegisterDevice,
   requestReauthCode as apiRequestReauthCode,
   ApiRequestError,
 } from "@/api/client";
-import { getOrCreateDeviceUuid } from "@/lib/deviceIdentity";
+import { getOrCreateDeviceUuid, setDeviceUuid } from "@/lib/deviceIdentity";
 
 export type DevicePhase =
   | "loading"
@@ -35,6 +36,7 @@ interface StudentDeviceState {
   registerDevice: () => Promise<boolean>;
   requestReauthCode: (email: string) => Promise<boolean>;
   confirmReauth: (email: string, code: string) => Promise<boolean>;
+  confirmPairing: (code: string) => Promise<boolean>;
   reset: () => void;
 }
 
@@ -57,7 +59,6 @@ export const useStudentDeviceStore = create<StudentDeviceState>((set) => ({
       if (binding.device_uuid === localUuid) {
         set({ phase: "ready" });
       } else {
-        // UUID is bound to a DIFFERENT account → email re-auth required.
         set({ phase: "needsReauth" });
       }
     } catch (e) {
@@ -115,6 +116,19 @@ export const useStudentDeviceStore = create<StudentDeviceState>((set) => ({
     try {
       const uuid = getOrCreateDeviceUuid();
       await apiConfirmReauth(email.trim(), code.trim(), uuid);
+      set({ phase: "ready", busy: false, codeSent: false });
+      return true;
+    } catch (e) {
+      set({ busy: false, error: errMsg(e) });
+      return false;
+    }
+  },
+
+  confirmPairing: async (code) => {
+    set({ busy: true, error: null });
+    try {
+      const binding = await apiConfirmDevicePairing(code.trim());
+      setDeviceUuid(binding.device_uuid);
       set({ phase: "ready", busy: false, codeSent: false });
       return true;
     } catch (e) {

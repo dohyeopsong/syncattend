@@ -46,15 +46,12 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
     loadMyCourses();
   }, [loadMyCourses]);
 
-  // The backend returns a bounded recent slice for a blank query. Send the
-  // search term to the backend so students can find courses outside that
-  // initial slice, then keep the field-specific filter local.
+  // Load the complete catalog once. Search and field filtering stay local so
+  // changing the query is immediate and never hides courses outside a server
+  // result limit.
   useEffect(() => {
-    const timer = setTimeout(() => {
-      void loadCatalog(query);
-    }, query.trim() ? 250 : 0);
-    return () => clearTimeout(timer);
-  }, [loadCatalog, query]);
+    void loadCatalog();
+  }, [loadCatalog]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

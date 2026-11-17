@@ -190,6 +190,11 @@ export interface DeviceBinding {
   bound_at: string;
 }
 
+export interface DevicePairingCode {
+  code: string;
+  expires_in: number;
+}
+
 // One row of the student's own attendance history (GET /me/attendance).
 export interface MyAttendanceItem {
   record_id: string;

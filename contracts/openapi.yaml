@@ -289,6 +289,53 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceBinding' }
 
+  /devices/pairing/code:
+    post:
+      tags: [devices]
+      summary: Create a one-time code to pair the mobile device with the web client
+      operationId: createDevicePairingCode
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [device_uuid]
+              properties:
+                device_uuid: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Six-digit pairing code
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DevicePairingCode' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /devices/pairing/confirm:
+    post:
+      tags: [devices]
+      summary: Confirm a mobile-to-web device pairing code
+      operationId: confirmDevicePairing
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, minLength: 6, maxLength: 6 }
+      responses:
+        '200':
+          description: Existing mobile device binding
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceBinding' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   # ------------------------------------------------------------- courses
   /courses:
     post:
@@ -1269,6 +1316,13 @@ components:
         account_id: { type: string }
         device_uuid: { type: string, format: uuid }
         bound_at: { type: string, format: date-time }
+
+    DevicePairingCode:
+      type: object
+      required: [code, expires_in]
+      properties:
+        code: { type: string, minLength: 6, maxLength: 6 }
+        expires_in: { type: integer, description: code validity in seconds }
 
     Session:
       type: object

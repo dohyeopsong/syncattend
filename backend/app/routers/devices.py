@@ -10,6 +10,7 @@ go through email re-auth (/devices/reregister/*).
 from __future__ import annotations
 
 import logging
+import json
 import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -23,6 +24,9 @@ from app.models import Device, DeviceChange, User
 from app.redis_client import get_redis
 from app.schemas import (
     DeviceBinding,
+    DevicePairingCode,
+    DevicePairingConfirm,
+    DevicePairingRequest,
     RegisterDeviceRequest,
     ReregisterConfirmBody,
     ReregisterRequestBody,
@@ -32,6 +36,11 @@ from app.services.email_codes import issue_reregister_code, verify_reregister_co
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 logger = logging.getLogger("syncattend.devices")
+_PAIRING_TTL_SECONDS = 300
+
+
+def _pairing_key(code: str) -> str:
+    return f"device:pairing:{code}"
 
 
 async def _active_binding(db: AsyncSession, user_id: str) -> Device | None:
@@ -225,4 +234,65 @@ async def get_my_device(
         )
     return DeviceBinding(
         account_id=user.id, device_uuid=binding.device_uuid, bound_at=binding.bound_at
+    )
+
+
+@router.post(
+    "/pairing/code",
+    response_model=DevicePairingCode,
+    operation_id="createDevicePairingCode",
+)
+async def create_device_pairing_code(
+    body: DevicePairingRequest,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DevicePairingCode:
+    binding = await _active_binding(db, user.id)
+    if binding is None or binding.device_uuid != body.device_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="현재 앱 기기가 계정에 등록된 기기와 일치하지 않습니다.",
+        )
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    await get_redis().set(
+        _pairing_key(code),
+        json.dumps({"user_id": user.id, "device_uuid": binding.device_uuid}),
+        ex=_PAIRING_TTL_SECONDS,
+    )
+    return DevicePairingCode(code=code, expires_in=_PAIRING_TTL_SECONDS)
+
+
+@router.post(
+    "/pairing/confirm",
+    response_model=DeviceBinding,
+    operation_id="confirmDevicePairing",
+)
+async def confirm_device_pairing(
+    body: DevicePairingConfirm,
+    user: CurrentUser = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> DeviceBinding:
+    raw = await get_redis().get(_pairing_key(body.code.strip()))
+    if raw is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="연결 코드가 올바르지 않거나 만료되었습니다.",
+        )
+    payload = json.loads(raw)
+    if payload.get("user_id") != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="같은 계정으로 로그인한 웹에서만 연결할 수 있습니다.",
+        )
+    binding = await _active_binding(db, user.id)
+    if binding is None or binding.device_uuid != payload.get("device_uuid"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="앱 기기 등록 상태가 변경되었습니다. 연결 코드를 다시 발급하세요.",
+        )
+    await get_redis().delete(_pairing_key(body.code.strip()))
+    return DeviceBinding(
+        account_id=user.id,
+        device_uuid=binding.device_uuid,
+        bound_at=binding.bound_at,
     )

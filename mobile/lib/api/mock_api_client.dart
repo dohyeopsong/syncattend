@@ -213,6 +213,11 @@ class MockApiClient implements ApiClient {
   }
 
   @override
+  Future<DevicePairingCode> createDevicePairingCode(String deviceUuid) async {
+    return const DevicePairingCode(code: '123456', expiresIn: 300);
+  }
+
+  @override
   Future<VerifyResult> verifyAttendance(VerifyRequest request) async {
     await _latency();
 

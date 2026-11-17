@@ -25,7 +25,6 @@ const SCHOOL_DOMAIN = "@wku.ac.kr";
 
 export function DeviceRegistrationScreen() {
   const { busy, error, registerDevice } = useStudentDeviceStore();
-  const goToReauth = useStudentDeviceStore((s) => s.requestReauthCode);
   const setPhase = useStudentDeviceStore.setState;
 
   return (
@@ -67,8 +66,8 @@ export function DeviceRegistrationScreen() {
             disabled={busy}
             onClick={() => {
               // Jump straight to the reauth flow (skips requesting a code until
-              // the user enters an email).
-              void goToReauth("");
+              // the user enters a valid email). Do not call the API with an
+              // empty value; that caused the browser pattern error.
               setPhase({ phase: "needsReauth" });
             }}
           >
@@ -83,16 +82,17 @@ export function DeviceRegistrationScreen() {
 export function DeviceReauthScreen() {
   const { busy, error, codeSent, requestReauthCode, confirmReauth } =
     useStudentDeviceStore();
+  const confirmPairing = useStudentDeviceStore((s) => s.confirmPairing);
   const logout = useAuthStore((s) => s.logout);
   const navigate = useNavigate();
   const email = useAuthStore((s) => s.email) ?? "";
 
   const [emailInput, setEmailInput] = useState(email);
   const [code, setCode] = useState("");
+  const [pairingCode, setPairingCode] = useState("");
 
-  const isEmailValid =
-    emailInput.trim().toLowerCase().endsWith(SCHOOL_DOMAIN) &&
-    emailInput.includes("@");
+  const schoolEmailPattern = /^[^@\s]+@wku\.ac\.kr$/i;
+  const isEmailValid = schoolEmailPattern.test(emailInput.trim());
 
   function backToLogin() {
     logout();
@@ -135,9 +135,11 @@ export function DeviceReauthScreen() {
           <div className="space-y-2">
             <label className="text-sm font-medium">학교 이메일 (@wku.ac.kr)</label>
             <Input
-              type="text"
+              type="email"
               autoComplete="email"
               placeholder="student@wku.ac.kr"
+              pattern="^[^@\s]+@wku\.ac\.kr$"
+              title={`학교 이메일 형식: student${SCHOOL_DOMAIN}`}
               value={emailInput}
               onChange={(e) => setEmailInput(e.target.value)}
               disabled={busy}
@@ -156,6 +158,31 @@ export function DeviceReauthScreen() {
               />
             </div>
           )}
+
+          <div className="space-y-2 border-t pt-4">
+            <label className="text-sm font-medium">앱 연결 코드</label>
+            <Input
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="앱에서 표시한 6자리 코드"
+              value={pairingCode}
+              onChange={(e) =>
+                setPairingCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+              }
+              disabled={busy}
+            />
+            <p className="text-xs text-muted-foreground">
+              모바일 앱의 메뉴에서 기기 연결 코드를 발급한 뒤 입력하세요.
+            </p>
+            <Button
+              variant="outline"
+              className="w-full"
+              disabled={busy || pairingCode.length !== 6}
+              onClick={() => void confirmPairing(pairingCode)}
+            >
+              앱 UUID로 웹 연결
+            </Button>
+          </div>
 
           {error && (
             <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">

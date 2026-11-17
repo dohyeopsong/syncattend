@@ -183,6 +183,19 @@ class DeviceBinding(BaseModel):
     bound_at: datetime
 
 
+class DevicePairingRequest(BaseModel):
+    device_uuid: str
+
+
+class DevicePairingCode(BaseModel):
+    code: str
+    expires_in: int
+
+
+class DevicePairingConfirm(BaseModel):
+    code: str
+
+
 # ----------------------------------------------------------------- courses
 PERIOD_ORDER_ERROR = "start_period must be <= end_period"
 

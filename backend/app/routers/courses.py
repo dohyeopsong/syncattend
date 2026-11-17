@@ -683,9 +683,9 @@ async def list_course_catalog(
     planning). Flags which ones the caller is already enrolled in.
 
     Optional `q` filters by course name, professor name, or 학수번호 (ILIKE,
-    case-insensitive substring). Absent/blank `q` returns a bounded recent
-    slice (not the entire catalog) so a cold load doesn't pull thousands of
-    rows. With a search term, results are capped to the first 50 matches."""
+    case-insensitive substring). Absent/blank `q` returns the full catalog so
+    clients can search instantly without losing courses outside an initial
+    result slice."""
     stmt = select(Course)
     if q is not None and q.strip():
         pattern = f"%{q.strip()}%"
@@ -696,9 +696,7 @@ async def list_course_catalog(
                 Course.code.ilike(pattern),
             )
         )
-    # Cap results so a broad/blank search never serializes the full catalog
-    # (the DB has ~2000 courses). 50 is plenty for an autocomplete dropdown.
-    stmt = stmt.order_by(Course.name).limit(50)
+    stmt = stmt.order_by(Course.name)
     courses = (await db.execute(stmt)).scalars().all()
     my_ids = set(
         (

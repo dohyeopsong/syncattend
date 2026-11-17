@@ -55,6 +55,52 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     }
   }
 
+  Future<void> _showWebPairingCode() async {
+    try {
+      final uuid = await ref.read(deviceIdentityProvider).getOrCreate();
+      final pairing =
+          await ref.read(apiClientProvider).createDevicePairingCode(uuid);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('웹 기기 연결'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                '웹에서 같은 계정으로 로그인한 뒤 아래 6자리 코드를 입력하세요.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              SelectableText(
+                pairing.code,
+                style: const TextStyle(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 8,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text('유효 시간: ${pairing.expiresIn ~/ 60}분'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('닫기'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('연결 코드 발급 실패: $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isTimetable = _index == _timetableIndex;
@@ -78,6 +124,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
               )
             : Text(_titles[_index]),
         actions: [
+          IconButton(
+            onPressed: _showWebPairingCode,
+            icon: const Icon(Icons.link),
+            tooltip: '웹 기기 연결',
+          ),
           if (isTimetable)
             IconButton(
               onPressed: () => showCourseCatalogSheet(context),

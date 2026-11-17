@@ -238,6 +238,19 @@ class DioApiClient implements ApiClient {
   }
 
   @override
+  Future<DevicePairingCode> createDevicePairingCode(String deviceUuid) async {
+    try {
+      final res = await _dio.post(
+        '/devices/pairing/code',
+        data: {'device_uuid': deviceUuid},
+      );
+      return DevicePairingCode.fromJson(res.data as Map<String, dynamic>);
+    } on DioException catch (e) {
+      _rethrowAsApiError(e);
+    }
+  }
+
+  @override
   Future<VerifyResult> verifyAttendance(VerifyRequest request) async {
     try {
       final res =

@@ -42,6 +42,7 @@ abstract class ApiClient {
     required String newDeviceUuid,
   });
   Future<DeviceBinding> getMyDevice();
+  Future<DevicePairingCode> createDevicePairingCode(String deviceUuid);
 
   // attendance
   Future<VerifyResult> verifyAttendance(VerifyRequest request);
