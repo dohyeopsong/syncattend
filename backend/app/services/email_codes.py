@@ -18,6 +18,7 @@ import json
 import logging
 import secrets
 import urllib.request
+from urllib.error import HTTPError
 
 from app.config import get_settings
 
@@ -52,9 +53,15 @@ def _send_via_resend(to_email: str, subject: str, body: str) -> None:
     when outbound SMTP (465/587) is blocked.
     """
     settings = get_settings()
+    api_key = (settings.resend_api_key or "").strip()
+    from_address = (settings.resend_from or "").strip()
+    if not from_address:
+        raise RuntimeError(
+            "RESEND_FROM is required when Resend delivery is enabled"
+        )
     payload = json.dumps(
         {
-            "from": settings.resend_from,
+            "from": from_address,
             "to": [to_email],
             "subject": subject,
             "text": body,
@@ -65,15 +72,21 @@ def _send_via_resend(to_email: str, subject: str, body: str) -> None:
         "https://api.resend.com/emails",
         data=payload,
         headers={
-            "Authorization": f"Bearer {settings.resend_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        # Resend returns 200 on success; any error raises HTTPError (caught
-        # by the caller). Read the body so the connection can be reused.
-        resp.read()
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            resp.read()
+    except HTTPError as exc:
+        # Resend includes the actionable reason (invalid key, unverified
+        # sender, restricted domain, etc.) in the JSON error body.
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"Resend HTTP {exc.code}: {detail or exc.reason}"
+        ) from exc
 
 
 async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
@@ -90,7 +103,7 @@ async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
     settings = get_settings()
 
     # 1. Resend (preferred for hosts that block SMTP).
-    if settings.resend_api_key:
+    if (settings.resend_api_key or "").strip():
         try:
             await asyncio.to_thread(_send_via_resend, email, subject, body)
             logger.info("verification code email sent to %s (via Resend)", email)

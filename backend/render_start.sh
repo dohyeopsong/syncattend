@@ -16,6 +16,8 @@
 #   JWT_SECRET        — a strong random secret (SET THIS)
 #   CORS_ORIGINS      — comma-separated Vercel URL(s), e.g. https://yourapp.vercel.app
 #   SCHOOL_EMAIL_DOMAIN — @wku.ac.kr (default)
+#   RESEND_API_KEY    — Resend API key (recommended; HTTPS on port 443)
+#   RESEND_FROM       — verified sender, e.g. noreply@your-domain.com
 set -euo pipefail
 
 cd "$(dirname "$0")"

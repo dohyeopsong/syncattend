@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     # routes through Resend's HTTPS endpoint; otherwise falls back to SMTP /
     # the dev stub. The "from" address must be a verified sender in Resend.
     resend_api_key: str | None = None
-    resend_from: str = "onboarding@resend.dev"
+    # Required when RESEND_API_KEY is configured. Do not silently fall back to
+    # Resend's test sender, which cannot deliver to arbitrary recipients.
+    resend_from: str | None = None
 
     # Risk-group thresholds (SSE warning) — externalized boundaries.
     # danger  when absences >= risk_absence_threshold
