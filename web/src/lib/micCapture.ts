@@ -2,7 +2,7 @@
 //
 // Web Audio API equivalent of the Flutter AudioCaptureService: opens the mic,
 // feeds frequency-bin snapshots to an AudioNonceDecoder, and emits decoded
-// nonce strings. Designed for iPhone Safari (the mic captures 17–18.5 kHz
+// nonce strings. Designed for iPhone Safari (the mic captures 18.5–20 kHz
 // ultrasonic frames emitted by the professor PC speaker, same as the Flutter
 // app on the same hardware).
 //
@@ -24,7 +24,7 @@ export interface CaptureOptions {
    *  15ms keeps oversampling dense enough for run-segmentation. */
   pollIntervalMs?: number;
   /** AnalyserNode FFT size (power of 2). 2048 → binHz ≈ 23 Hz at 48 kHz,
-   *  enough resolution to separate 16 slots across 17000–18500 Hz. */
+   *  enough resolution to separate 16 slots across 18500–20000 Hz. */
   fftSize?: number;
 }
 

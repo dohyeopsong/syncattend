@@ -26,10 +26,9 @@ abstract class CaptureService {
 /// Default 48 kHz (not 44.1): iOS mic hardware captures natively at 48 kHz. If
 /// we request 44.1 kHz, `record`'s iOS layer inserts an AVAudioConverter that
 /// downsamples 48→44.1 kHz, and the resampler's anti-aliasing low-pass heavily
-/// attenuates our 17–18.5 kHz band (it sits near the filter edge, ~85% of the
-/// 22.05 kHz Nyquist). Capturing at the hardware-native 48 kHz avoids that
-/// converter entirely, preserving the ultrasonic band. 18.5 kHz is well within
-/// 48 kHz Nyquist (24 kHz). The decoder is initialised at the same rate so its
+/// attenuates the 18.5–20 kHz band near the 22.05 kHz Nyquist limit. Capturing
+/// at the hardware-native 48 kHz avoids that converter entirely, preserving the
+/// ultrasonic band. The decoder is initialised at the same rate so its
 /// FFT bins map to the correct absolute slot frequencies.
 class AudioCaptureService implements CaptureService {
   AudioCaptureService({
@@ -93,7 +92,11 @@ class AudioCaptureService implements CaptureService {
 
     // Diagnostics: confirm PCM is actually flowing and how loud the signal is.
     var chunkCount = 0;
+    // Keep a read offset instead of removing the consumed prefix on every
+    // overlapping window. removeRange(0, hopSamples) shifts the whole list
+    // repeatedly and turns a steady capture stream into avoidable O(n) work.
     final buffer = <double>[];
+    var bufferStart = 0;
     _sub = pcmStream.listen((chunk) {
       // PCM16 little-endian → normalized doubles.
       final bytes = ByteData.sublistView(chunk);
@@ -108,11 +111,11 @@ class AudioCaptureService implements CaptureService {
       // we can tell "mic is dead/muted" (peak≈0) from "mic works but no tone".
       if (chunkCount < 5 || chunkCount % 50 == 0) {
         // Also probe the ultrasonic band on the most recent full window so we
-        // see whether 17–18.5 kHz energy is arriving even when it's below the
+        // see whether 18.5–20 kHz energy is arriving even when it's below the
         // detection threshold (ratio vs threshold tells us louder/closer vs
         // lower-threshold is the fix).
         String bandInfo = '';
-        if (buffer.length >= windowSamples) {
+        if (buffer.length - bufferStart >= windowSamples) {
           final w = Float64List.fromList(
               buffer.sublist(buffer.length - windowSamples));
           final d = decoder.diagnoseBand(w);
@@ -129,16 +132,28 @@ class AudioCaptureService implements CaptureService {
       chunkCount++;
       // Slide a window of `windowSamples` forward by `hopSamples` each step so
       // consecutive windows overlap (oversampling).
-      while (buffer.length >= windowSamples) {
-        final window = Float64List.fromList(buffer.sublist(0, windowSamples));
-        buffer.removeRange(0, hopSamples);
+      while (buffer.length - bufferStart >= windowSamples) {
+        final window = Float64List(windowSamples);
+        window.setRange(
+          0,
+          windowSamples,
+          buffer,
+          bufferStart,
+        );
+        bufferStart += hopSamples;
         _windows?.add(window);
+      }
+      // Compact only after enough data has been consumed. This keeps the
+      // normal hot path allocation-free while bounding retained samples.
+      if (bufferStart > 4096 && bufferStart * 2 >= buffer.length) {
+        buffer.removeRange(0, bufferStart);
+        bufferStart = 0;
       }
     }, onError: (Object e, StackTrace st) {
       debugPrint('[audio] pcm stream error: $e');
     });
 
-    // Diagnostics: log detected slots so we can see if the 17–18.5 kHz band
+    // Diagnostics: log detected slots so we can see if the 18.5–20 kHz band
     // ever clears the detection threshold on this hardware.
     var slotLogCount = 0;
     return decoder.decodeStreamRealtime(

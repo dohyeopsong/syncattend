@@ -13,7 +13,7 @@ import 'permissions_service.dart';
 /// speaker → air → microphone — which cannot be automated in CI.
 ///
 /// HOW TO RUN (manual, needs hardware):
-///  1. Have owner C's emitter (or any tool) play the agreed 18–20 kHz frames
+///  1. Have the professor web emitter (or any tool) play the agreed 18.5–20 kHz frames
 ///     (start marker + 8 hex nibbles) from a speaker.
 ///  2. Open this screen on a real device (or macOS with mic entitlement) at a
 ///     known distance / noise condition.
@@ -144,7 +144,7 @@ class _AudioLoopbackHarnessScreenState
           children: [
             const Text(
               '실기기에서 스피커→마이크 물리 루프백으로 초음파 nonce 복호를 실측합니다.\n'
-              'emitter(교수 측/도구)가 18–20kHz 프레임을 재생하는 동안 측정하세요.',
+              'emitter(교수 측/도구)가 18.5–20kHz 프레임을 재생하는 동안 측정하세요.',
               style: TextStyle(fontSize: 13),
             ),
             const SizedBox(height: 12),

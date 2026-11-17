@@ -125,10 +125,18 @@ def _send_via_smtp(to_email: str, subject: str, body: str) -> None:
     msg["From"] = settings.smtp_user or ""
     msg["To"] = to_email
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=20) as server:
+    # Port 465 uses implicit TLS from the first byte; port 587 (and other
+    # submission ports) negotiate TLS with STARTTLS after the greeting.
+    server_factory = (
+        smtplib.SMTP_SSL if settings.smtp_port == 465 else smtplib.SMTP
+    )
+    with server_factory(
+        settings.smtp_host, settings.smtp_port, timeout=20
+    ) as server:
         server.ehlo()
-        server.starttls()
-        server.ehlo()
+        if settings.smtp_port != 465:
+            server.starttls()
+            server.ehlo()
         server.login(settings.smtp_user, settings.smtp_password)
         server.sendmail(settings.smtp_user, to_email, msg.as_bytes())
 

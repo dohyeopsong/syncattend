@@ -6,7 +6,7 @@
 // student (iPhone Safari mic) decodes the SAME frames the professor PC emits.
 //
 // PROTOCOL (must match emitter + Flutter decoder exactly):
-//  - Band: 17000–18500 Hz split into 16 tone slots (4 bits/symbol).
+//  - Band: 18500–20000 Hz split into 16 tone slots (4 bits/symbol).
 //  - Symbol length: 60 ms per symbol.
 //  - Framing: a start marker tone (highest slot, 0xF) precedes the nonce
 //    symbols. Because slot 15 == 0xF is reserved as the marker, the nonce
@@ -30,8 +30,8 @@ export interface DecoderProtocol {
 
 export const DEFAULT_PROTOCOL: DecoderProtocol = {
   sampleRate: 48000,
-  bandLowHz: 17000,
-  bandHighHz: 18500,
+  bandLowHz: 18500,
+  bandHighHz: 20000,
   toneSlots: 16,
   symbolMs: 60,
 };

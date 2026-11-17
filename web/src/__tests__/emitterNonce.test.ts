@@ -7,6 +7,11 @@ import { nonceToNibbles, buildFramePcm, DEFAULT_PROTOCOL, markerSlot } from "@/l
 // when the backend still emitted base64url token_urlsafe).
 
 describe("nonceToNibbles — full hex round-trip", () => {
+  it("uses the frozen 18.5–20kHz protocol", () => {
+    expect(DEFAULT_PROTOCOL.bandLowHz).toBe(18500);
+    expect(DEFAULT_PROTOCOL.bandHighHz).toBe(20000);
+  });
+
   it("maps every hex[0-e]{8} char 1:1 to a nibble (nothing dropped)", () => {
     const nonce = "0e1d2c3b"; // 8 hex nibbles, all within 0..e
     const nibbles = nonceToNibbles(nonce);

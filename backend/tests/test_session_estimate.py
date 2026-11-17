@@ -98,7 +98,7 @@ def test_schedule_label_all_days():
 
 
 # --------------------------------------------------- estimateSession endpoint
-async def test_estimate_returns_week_and_slot(client, session):
+async def test_estimate_returns_week_and_slot(client, session, monkeypatch):
     """With a semester_start_date and a matching weekly slot, estimate returns
     both the week number and the slot id + label for the current time."""
     from datetime import date, timedelta
@@ -114,7 +114,11 @@ async def test_estimate_returns_week_and_slot(client, session):
     # Add a slot for today's day-of-week spanning the current period.
     from app.models import CourseSchedule
 
-    now = datetime.now(KST)
+    # Keep the endpoint deterministic. The test suite can run outside the
+    # 09:00–21:00 KST class-period range, which would otherwise make a valid
+    # schedule impossible to match.
+    now = datetime.now(KST).replace(hour=11, minute=30, second=0, microsecond=0)
+    monkeypatch.setattr("app.routers.sessions._now", lambda: now)
     cur_period = current_period(now)
     if cur_period is None:
         # If the test runs outside 09:00-21:00 KST, synthesize a slot that
@@ -146,7 +150,7 @@ async def test_estimate_returns_week_and_slot(client, session):
     assert body["pending_session_id"] is None
 
 
-async def test_estimate_suggests_checkout_after_1차_closed(client, session):
+async def test_estimate_suggests_checkout_after_1차_closed(client, session, monkeypatch):
     """After a session for the estimated week+slot is closed (1차 done, 2차 not
     opened), estimate should suggest check_out + return that session's id so the
     modal can openCheckout on it instead of creating a new session."""
@@ -160,7 +164,8 @@ async def test_estimate_suggests_checkout_after_1차_closed(client, session):
     course.semester_start_date = today - timedelta(days=70)
     await session.commit()
 
-    now = datetime.now(KST)
+    now = datetime.now(KST).replace(hour=11, minute=30, second=0, microsecond=0)
+    monkeypatch.setattr("app.routers.sessions._now", lambda: now)
     cur_period = current_period(now)
     if cur_period is None:
         cur_period = 1

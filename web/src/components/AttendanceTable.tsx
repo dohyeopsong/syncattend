@@ -175,9 +175,9 @@ export function AttendanceTable() {
   async function doClose() {
     if (!sessionId) return;
     setClosing(true);
-    // Ensure the auto-absent students are in the Delta queue before sending.
-    for (const sid of preview.autoAbsent) setDelta(sid, "absent");
-    const ok = await batchClose(sessionId);
+    // Send the complete preview directly. Relying on queued Zustand updates
+    // here can submit stale deltas while the confirmation popup is closing.
+    const ok = await batchClose(sessionId, preview.deltas);
     if (ok) {
       // 마감 완료 → 현재 라운드 인증이 DB에 저장됨. 세션을 완전히 리셋하여
       // QR 모달/토큰 폴링이 남지 않게 하고, 결석자 검토 팝업도 닫는다.

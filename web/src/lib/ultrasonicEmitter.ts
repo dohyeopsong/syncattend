@@ -27,11 +27,7 @@
 // It MUST stay protocol-compatible with the Flutter decoder at
 //   mobile/lib/features/attendance/audio_nonce_decoder.dart
 // (READ-ONLY reference; owned by B). Confirmed protocol:
-//   - Band 17000–18500 Hz, 16 tone slots (4 bits/symbol). (Lowered from
-//     18000–20000 Hz: on-device TR-0 testing found laptop speakers barely
-//     radiate 19–20 kHz, so the phone never saw the start marker — decode 0%.
-//     17–18.5 kHz is emitted strongly and decodes 100% in physical loopback;
-//     17 kHz keeps the annoying 16 kHz out.)
+//   - Band 18500–20000 Hz, 16 tone slots (4 bits/symbol).
 //   - Symbol length 60 ms; slot 15 (highest) = start marker.
 //   - Nonce = hex nibbles, each nibble (0..14) = one tone slot; frame is
 //     [marker, n0, n1, ... n7].
@@ -54,16 +50,16 @@
 
 export interface EmitterProtocol {
   sampleRate: number; // AudioContext rate; slot bins are computed from this
-  bandLowHz: number; // 17000
-  bandHighHz: number; // 18500
+  bandLowHz: number; // 18500
+  bandHighHz: number; // 20000
   toneSlots: number; // 16
   symbolMs: number; // 60
 }
 
 export const DEFAULT_PROTOCOL: EmitterProtocol = {
   sampleRate: 44100,
-  bandLowHz: 17000,
-  bandHighHz: 18500,
+  bandLowHz: 18500,
+  bandHighHz: 20000,
   toneSlots: 16,
   symbolMs: 60,
 };

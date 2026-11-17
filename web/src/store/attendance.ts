@@ -33,7 +33,10 @@ interface AttendanceState {
   fetchAggregate: (sessionId: string) => Promise<void>;
   setDelta: (studentId: string, status: AttendanceStatus) => void;
   clearDelta: (studentId: string) => void;
-  batchClose: (sessionId: string) => Promise<boolean>;
+  batchClose: (
+    sessionId: string,
+    deltas?: AttendanceDelta[],
+  ) => Promise<boolean>;
   correct: (recordId: string, status: AttendanceStatus) => Promise<boolean>;
   subscribeSse: (sessionId: string) => void;
   unsubscribeSse: () => void;
@@ -76,10 +79,13 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
     set({ pendingDeltas: next });
   },
 
-  batchClose: async (sessionId) => {
-    const deltas: AttendanceDelta[] = Object.entries(get().pendingDeltas).map(
-      ([student_id, status]) => ({ student_id, status }),
-    );
+  batchClose: async (sessionId, explicitDeltas) => {
+    const deltas =
+      explicitDeltas ??
+      Object.entries(get().pendingDeltas).map(([student_id, status]) => ({
+        student_id,
+        status,
+      }));
     // Always call the endpoint — even with no explicit deltas, the backend
     // auto-fails every unverified (pending) student to absent at close time
     // ("대기 없음" policy). Skipping would leave pending students unverified.

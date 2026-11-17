@@ -42,7 +42,9 @@ export function DashboardPage() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="review-title"
-          onClick={closeReview}
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeReview();
+          }}
         >
           <div
             className="my-4 w-full max-w-3xl"

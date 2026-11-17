@@ -1,13 +1,34 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuthStore } from "@/store/auth";
-import { RoleSelectPage } from "@/pages/RoleSelectPage";
-import { LoginPage } from "@/pages/LoginPage";
-import { StudentLoginPage } from "@/pages/StudentLoginPage";
-import { StudentSignupPage } from "@/pages/student/StudentSignupPage";
-import { StudentHomePage } from "@/pages/student/StudentHomePage";
-import { StudentVerifyPage } from "@/pages/StudentVerifyPage";
-import { DashboardPage } from "@/pages/DashboardPage";
+
+const RoleSelectPage = lazy(() =>
+  import("@/pages/RoleSelectPage").then((m) => ({ default: m.RoleSelectPage })),
+);
+const LoginPage = lazy(() =>
+  import("@/pages/LoginPage").then((m) => ({ default: m.LoginPage })),
+);
+const StudentLoginPage = lazy(() =>
+  import("@/pages/StudentLoginPage").then((m) => ({ default: m.StudentLoginPage })),
+);
+const StudentSignupPage = lazy(() =>
+  import("@/pages/student/StudentSignupPage").then((m) => ({
+    default: m.StudentSignupPage,
+  })),
+);
+const StudentHomePage = lazy(() =>
+  import("@/pages/student/StudentHomePage").then((m) => ({
+    default: m.StudentHomePage,
+  })),
+);
+const StudentVerifyPage = lazy(() =>
+  import("@/pages/StudentVerifyPage").then((m) => ({
+    default: m.StudentVerifyPage,
+  })),
+);
+const DashboardPage = lazy(() =>
+  import("@/pages/DashboardPage").then((m) => ({ default: m.DashboardPage })),
+);
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   const accessToken = useAuthStore((s) => s.accessToken);
@@ -39,45 +60,53 @@ export function App() {
   }, [hydrate]);
 
   return (
-    <Routes>
-      {/* Public landing: pick professor or student. */}
-      <Route path="/" element={<RoleSelectPage />} />
-      {/* Login pages (each sends the matching X-Client-Type). */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/student/login" element={<StudentLoginPage />} />
-      <Route path="/student/signup" element={<StudentSignupPage />} />
-      {/* Authenticated areas. */}
-      <Route
-        path="/dashboard"
-        element={
-          <RequireAuth>
-            <RequireProfessor>
-              <DashboardPage />
-            </RequireProfessor>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/student"
-        element={
-          <RequireAuth>
-            <RequireStudent>
-              <StudentHomePage />
-            </RequireStudent>
-          </RequireAuth>
-        }
-      />
-      <Route
-        path="/student/verify"
-        element={
-          <RequireAuth>
-            <RequireStudent>
-              <StudentVerifyPage />
-            </RequireStudent>
-          </RequireAuth>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">
+          불러오는 중…
+        </div>
+      }
+    >
+      <Routes>
+        {/* Public landing: pick professor or student. */}
+        <Route path="/" element={<RoleSelectPage />} />
+        {/* Login pages (each sends the matching X-Client-Type). */}
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/student/login" element={<StudentLoginPage />} />
+        <Route path="/student/signup" element={<StudentSignupPage />} />
+        {/* Authenticated areas. */}
+        <Route
+          path="/dashboard"
+          element={
+            <RequireAuth>
+              <RequireProfessor>
+                <DashboardPage />
+              </RequireProfessor>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/student"
+          element={
+            <RequireAuth>
+              <RequireStudent>
+                <StudentHomePage />
+              </RequireStudent>
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/student/verify"
+          element={
+            <RequireAuth>
+              <RequireStudent>
+                <StudentVerifyPage />
+              </RequireStudent>
+            </RequireAuth>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

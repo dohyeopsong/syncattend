@@ -11,12 +11,7 @@ import 'package:fftea/fftea.dart';
 /// (frequency map, symbol length, encoding) MUST be agreed with owner C.
 ///
 /// PROTOCOL (CONFIRMED with owner A's contract + owner C's emitter, 2026-09-25):
-///  - Band: 17–18.5 kHz split into N tone slots (default 16 → 4 bits/symbol).
-///    (Lowered from 18–20 kHz after on-device TR-0 testing: laptop speakers
-///    radiate almost nothing at 19–20 kHz, so the frame's start-marker slot
-///    never reached the phone and decode was 0%. A speaker-response probe showed
-///    17–18 kHz is emitted strongly; a physical loopback battery decodes 100%
-///    at 17–18.5 kHz. 17 kHz avoids the audible/annoying 16 kHz.)
+///  - Band: 18.5–20 kHz split into N tone slots (default 16 → 4 bits/symbol).
 ///  - Symbol length: [symbolMs] ms per symbol (default 60ms).
 ///  - Framing: a start marker tone (highest slot, 0xF) precedes the nonce
 ///    symbols. Because slot 15 == 0xF is reserved as the marker, the nonce
@@ -38,8 +33,8 @@ import 'package:fftea/fftea.dart';
 class AudioNonceDecoder {
   AudioNonceDecoder({
     this.sampleRate = 48000,
-    this.bandLowHz = 17000,
-    this.bandHighHz = 18500,
+    this.bandLowHz = 18500,
+    this.bandHighHz = 20000,
     this.toneSlots = 16,
     this.symbolMs = 60,
     this.detectionThreshold = 4.0,
