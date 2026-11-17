@@ -90,9 +90,19 @@ export function DeviceReauthScreen() {
   const [emailInput, setEmailInput] = useState(email);
   const [code, setCode] = useState("");
   const [pairingCode, setPairingCode] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const schoolEmailPattern = /^[^@\s]+@wku\.ac\.kr$/i;
-  const isEmailValid = schoolEmailPattern.test(emailInput.trim());
+
+  function requestEmailCode() {
+    const normalized = emailInput.trim().toLowerCase();
+    if (!schoolEmailPattern.test(normalized)) {
+      setEmailError("학교 이메일은 student@wku.ac.kr 형식으로 입력하세요.");
+      return;
+    }
+    setEmailError(null);
+    void requestReauthCode(normalized);
+  }
 
   function backToLogin() {
     logout();
@@ -135,15 +145,20 @@ export function DeviceReauthScreen() {
           <div className="space-y-2">
             <label className="text-sm font-medium">학교 이메일 (@wku.ac.kr)</label>
             <Input
-              type="email"
+              type="text"
               autoComplete="email"
               placeholder="student@wku.ac.kr"
-              pattern="^[^@\s]+@wku\.ac\.kr$"
               title={`학교 이메일 형식: student${SCHOOL_DOMAIN}`}
               value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
+              onChange={(e) => {
+                setEmailInput(e.target.value);
+                setEmailError(null);
+              }}
               disabled={busy}
             />
+            {emailError && (
+              <p className="text-xs text-destructive">{emailError}</p>
+            )}
           </div>
 
           {codeSent && (
@@ -193,11 +208,11 @@ export function DeviceReauthScreen() {
 
           <Button
             className="w-full"
-            disabled={busy || !isEmailValid}
+            disabled={busy}
             onClick={() =>
               codeSent
                 ? void confirmReauth(emailInput, code)
-                : void requestReauthCode(emailInput)
+                : requestEmailCode()
             }
           >
             {busy ? (
@@ -213,7 +228,7 @@ export function DeviceReauthScreen() {
             <button
               className="w-full text-center text-sm text-muted-foreground hover:text-foreground"
               disabled={busy}
-              onClick={() => void requestReauthCode(emailInput)}
+              onClick={requestEmailCode}
             >
               코드 다시 받기
             </button>
