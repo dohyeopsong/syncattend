@@ -143,7 +143,9 @@ export function DeviceReauthScreen() {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">학교 이메일 (@wku.ac.kr)</label>
+            <label className="text-sm font-medium">
+              학교 이메일 인증번호
+            </label>
             <Input
               type="text"
               autoComplete="email"
@@ -163,7 +165,7 @@ export function DeviceReauthScreen() {
 
           {codeSent && (
             <div className="space-y-2">
-              <label className="text-sm font-medium">인증 코드</label>
+              <label className="text-sm font-medium">이메일 인증번호</label>
               <Input
                 type="text"
                 placeholder="인증번호"
@@ -218,9 +220,9 @@ export function DeviceReauthScreen() {
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : codeSent ? (
-              "코드 확인 & 재바인딩"
+              "이메일 인증번호 확인 & 재바인딩"
             ) : (
-              "인증 코드 받기"
+              "학교 이메일 인증번호 받기"
             )}
           </Button>
 
@@ -230,7 +232,7 @@ export function DeviceReauthScreen() {
               disabled={busy}
               onClick={requestEmailCode}
             >
-              코드 다시 받기
+              이메일 인증번호 다시 받기
             </button>
           )}
         </CardContent>

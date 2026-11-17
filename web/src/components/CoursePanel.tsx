@@ -5,6 +5,7 @@ import {
   useState,
   type FormEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useCoursesStore, type SearchField } from "@/store/courses";
 import { useSessionStore } from "@/store/session";
 import { useAttendanceStore } from "@/store/attendance";
@@ -978,17 +979,22 @@ export function CoursePanel() {
         </div>
 
         {/* ---- add form (modal) ---- */}
-        {showAdd && (
-          <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        {showAdd &&
+          createPortal(
+            <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-add-title"
             onMouseDown={(e) => {
-              // Close when clicking the backdrop (not its children).
-              if (e.target === e.currentTarget) setShowAdd(false);
+                if (e.target === e.currentTarget) setShowAdd(false);
             }}
-          >
-            <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-card p-4 shadow-soft-lg">
-              <div className="mb-3 flex items-center justify-between">
-                <p className="text-sm font-medium">새 강좌 추가</p>
+            >
+              <div className="w-full max-w-lg rounded-2xl border border-border/60 bg-card p-4 shadow-soft-lg">
+                <div className="mb-3 flex items-center justify-between">
+                  <p id="course-add-title" className="text-sm font-medium">
+                    새 강좌 추가
+                  </p>
                 <Button
                   type="button"
                   size="icon"
@@ -999,8 +1005,8 @@ export function CoursePanel() {
                 >
                   <X className="h-4 w-4" />
                 </Button>
-              </div>
-              <form onSubmit={onCreate} className="space-y-3">
+                </div>
+                <form onSubmit={onCreate} className="space-y-3">
                 {/* Autocomplete: pick from the catalog to auto-fill, then adjust
                     요일/교시. If no match, fill the fields below manually. */}
                 <CatalogSearch
@@ -1036,10 +1042,11 @@ export function CoursePanel() {
                     <Plus className="h-4 w-4" /> 추가
                   </Button>
                 </div>
-              </form>
-            </div>
-          </div>
-        )}
+                </form>
+              </div>
+            </div>,
+            document.body,
+          )}
 
         {/* ---- open-session confirmation: estimated week + slot ---- */}
         {confirmOpen && (

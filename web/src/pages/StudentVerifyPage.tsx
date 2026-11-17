@@ -355,12 +355,16 @@ export function StudentVerifyPage() {
               <div className="flex items-center justify-between rounded-lg border p-3">
                 <span className="flex items-center gap-2 text-sm">
                   <Mic
-                    className={`h-4 w-4 ${audioLevel > 0 ? "text-success" : "text-muted-foreground"}`}
+                    className={`h-4 w-4 ${audioNonce ? "text-success" : "text-muted-foreground"}`}
                   />
                   초음파 수신
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {audioLevel > 0 ? "신호 감지됨" : "대기 중"}
+                  {/* Only show "감지됨" once a full audio nonce (auth token) has
+                      been decoded — NOT on any mic energy / slot detection, which
+                      ambient high-frequency noise can trigger. audioLevel still
+                      drives the live pulse below as a passive activity hint. */}
+                  {audioNonce ? "신호 감지됨" : "대기 중"}
                 </span>
               </div>
 

@@ -109,7 +109,18 @@ async function request<T>(
     headers.set("Authorization", `Bearer ${accessToken}`);
   }
 
-  let res = await fetch(`${BASE}${path}`, { ...options, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...options, headers });
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    throw new ApiRequestError(
+      0,
+      detail === "The string did not match the expected pattern."
+        ? "웹 API 요청 주소가 올바르지 않습니다. 페이지를 새로고침한 뒤 다시 시도하세요."
+        : detail,
+    );
+  }
 
   // 401 → try to refresh the access token ONCE, then replay the original
   // request with the new token. If refresh fails (refresh token also expired),
