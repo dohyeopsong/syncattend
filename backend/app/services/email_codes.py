@@ -115,6 +115,7 @@ async def _deliver(email: str, code: str, *, subject: str, body: str) -> None:
 
 def _send_via_smtp(to_email: str, subject: str, body: str) -> None:
     """SMTP fallback — synchronous, run in a worker thread."""
+    import socket
     import smtplib
     from email.header import Header
     from email.mime.text import MIMEText
@@ -125,14 +126,29 @@ def _send_via_smtp(to_email: str, subject: str, body: str) -> None:
     msg["From"] = settings.smtp_user or ""
     msg["To"] = to_email
 
+    # Render can resolve smtp.gmail.com to an unreachable IPv6 address.
+    # Resolve an IPv4 address explicitly for the submission connection, then
+    # restore the hostname before STARTTLS so certificate SNI remains correct.
+    ipv4 = socket.getaddrinfo(
+        settings.smtp_host,
+        settings.smtp_port,
+        socket.AF_INET,
+        socket.SOCK_STREAM,
+    )
+    if not ipv4:
+        raise OSError(f"no IPv4 address found for {settings.smtp_host}")
+    ipv4_host = ipv4[0][4][0]
+
     # Port 465 uses implicit TLS from the first byte; port 587 (and other
     # submission ports) negotiate TLS with STARTTLS after the greeting.
+    connect_host = settings.smtp_host if settings.smtp_port == 465 else ipv4_host
     server_factory = (
         smtplib.SMTP_SSL if settings.smtp_port == 465 else smtplib.SMTP
     )
-    with server_factory(
-        settings.smtp_host, settings.smtp_port, timeout=20
-    ) as server:
+    with server_factory(connect_host, settings.smtp_port, timeout=20) as server:
+        if settings.smtp_port != 465:
+            # smtplib uses _host as the TLS server_name in starttls().
+            server._host = settings.smtp_host
         server.ehlo()
         if settings.smtp_port != 465:
             server.starttls()

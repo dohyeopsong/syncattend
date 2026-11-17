@@ -46,6 +46,10 @@ def _settings(port: int):
 def test_smtp_port_587_uses_starttls(monkeypatch):
     _FakeSmtp.instances.clear()
     monkeypatch.setattr(email_codes, "get_settings", lambda: _settings(587))
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *_args: [(2, 1, 6, "", ("127.0.0.1", 587))],
+    )
     monkeypatch.setattr("smtplib.SMTP", _FakeSmtp)
 
     email_codes._send_via_smtp("student@example.test", "subject", "body")
@@ -59,6 +63,10 @@ def test_smtp_port_587_uses_starttls(monkeypatch):
 def test_smtp_port_465_uses_implicit_tls(monkeypatch):
     _FakeSmtp.instances.clear()
     monkeypatch.setattr(email_codes, "get_settings", lambda: _settings(465))
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *_args: [(2, 1, 6, "", ("127.0.0.1", 465))],
+    )
     monkeypatch.setattr("smtplib.SMTP_SSL", _FakeSmtp)
 
     email_codes._send_via_smtp("student@example.test", "subject", "body")
