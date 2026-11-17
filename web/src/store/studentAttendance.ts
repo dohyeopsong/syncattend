@@ -33,6 +33,8 @@ export interface StudentAttendanceState {
   // Device registration state.
   deviceRegistered: boolean;
   deviceError: string | null;
+  captureAttempt: number;
+  crossVerifyRetries: number;
 
   setQr: (raw: string) => void;
   setAudioNonce: (nonce: string) => void;
@@ -63,6 +65,8 @@ export const useStudentAttendanceStore = create<StudentAttendanceState>(
     checkOutDone: false,
     deviceRegistered: false,
     deviceError: null,
+    captureAttempt: 0,
+    crossVerifyRetries: 0,
 
     setQr: (raw) => {
       if (get().phase !== "capturing") return;
@@ -122,6 +126,8 @@ export const useStudentAttendanceStore = create<StudentAttendanceState>(
         secondsRemaining: DEFAULT_WINDOW_SECONDS,
         result: null,
         error: null,
+        captureAttempt: get().captureAttempt + 1,
+        crossVerifyRetries: 0,
       });
     },
 
@@ -155,6 +161,22 @@ export const useStudentAttendanceStore = create<StudentAttendanceState>(
           audio_nonce: s.audioNonce!,
           device_uuid: deviceUuid,
         });
+
+        if (
+          result.status === "rejected" &&
+          result.reason === "cross_verify_failed" &&
+          get().crossVerifyRetries < 1
+        ) {
+          set({
+            phase: "capturing",
+            audioNonce: null,
+            result: null,
+            error: null,
+            captureAttempt: get().captureAttempt + 1,
+            crossVerifyRetries: get().crossVerifyRetries + 1,
+          });
+          return;
+        }
 
         const newCheckIn =
           result.status === "verified"
@@ -192,6 +214,8 @@ export const useStudentAttendanceStore = create<StudentAttendanceState>(
         secondsRemaining: DEFAULT_WINDOW_SECONDS,
         result: null,
         error: null,
+        captureAttempt: get().captureAttempt + 1,
+        crossVerifyRetries: 0,
       });
     },
 

@@ -97,6 +97,7 @@ export function StudentVerifyPage() {
     qrToken,
     audioNonce,
     deviceError,
+    captureAttempt,
   } = s;
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -104,6 +105,7 @@ export function StudentVerifyPage() {
   const cameraStreamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
   const micRef = useRef<MicCaptureService | null>(null);
+  const startedAttemptRef = useRef(0);
 
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [micError, setMicError] = useState<string | null>(null);
@@ -150,59 +152,7 @@ export function StudentVerifyPage() {
     return () => clearInterval(id);
   }, [phase]);
 
-  // ---- Start capture (user gesture) ---------------------------------------
-  async function startCapture() {
-    setCameraError(null);
-    setMicError(null);
-    useStudentAttendanceStore.getState().startCapture();
-    getOrCreateDeviceUuid();
-
-    // 1) Camera (rear-facing on mobile).
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false,
-      });
-      cameraStreamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play().catch(() => {});
-      }
-      rafRef.current = requestAnimationFrame(scanFrame);
-    } catch (e) {
-      setCameraError(
-        e instanceof Error ? e.message : "카메라를 열 수 없습니다. 권한을 확인하세요.",
-      );
-    }
-
-    // 2) Microphone + ultrasonic decode.
-    try {
-      const mic = new MicCaptureService();
-      micRef.current = mic;
-      mic.onSlot = (slot) => {
-        setAudioLevel(slot !== null ? 1 : 0);
-      };
-      await mic.start((nonce) => {
-        useStudentAttendanceStore.getState().setAudioNonce(nonce);
-      });
-    } catch (e) {
-      setMicError(
-        e instanceof Error ? e.message : "마이크를 열 수 없습니다. 권한을 확인하세요.",
-      );
-    }
-  }
-
-  // ---- Cleanup -------------------------------------------------------------
-  useEffect(() => {
-    return () => {
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-      cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
-      void micRef.current?.stop();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (phase === "capturing") return;
+  function stopCapture() {
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -211,20 +161,94 @@ export function StudentVerifyPage() {
     cameraStreamRef.current = null;
     void micRef.current?.stop();
     micRef.current = null;
+  }
+
+  // ---- Start capture (user gesture) ---------------------------------------
+  async function openCaptureMedia() {
+    setCameraError(null);
+    setMicError(null);
+    let stream: MediaStream;
+    try {
+      // Request both permissions in one gesture, matching the mobile flow.
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      });
+      cameraStreamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play().catch(() => {});
+      }
+      rafRef.current = requestAnimationFrame(scanFrame);
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "카메라와 마이크 권한을 확인하세요.";
+      setCameraError(message);
+      setMicError(message);
+      return;
+    }
+
+    // Decode audio from the same stream so Safari does not need a second
+    // permission prompt after the user gesture has ended.
+    try {
+      const mic = new MicCaptureService();
+      micRef.current = mic;
+      mic.onSlot = (slot) => {
+        setAudioLevel(slot !== null ? 1 : 0);
+      };
+      await mic.start(
+        (nonce) => useStudentAttendanceStore.getState().setAudioNonce(nonce),
+        stream,
+      );
+    } catch (e) {
+      setMicError(
+        e instanceof Error ? e.message : "마이크를 열 수 없습니다. 권한을 확인하세요.",
+      );
+    }
+  }
+
+  async function startCapture() {
+    setCameraError(null);
+    setMicError(null);
+    useStudentAttendanceStore.getState().startCapture();
+    startedAttemptRef.current =
+      useStudentAttendanceStore.getState().captureAttempt;
+    getOrCreateDeviceUuid();
+    await openCaptureMedia();
+  }
+
+  // ---- Cleanup -------------------------------------------------------------
+  useEffect(() => {
+    return () => {
+      stopCapture();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (phase === "capturing") return;
+    stopCapture();
   }, [phase]);
 
+  useEffect(() => {
+    if (phase === "capturing" && captureAttempt !== startedAttemptRef.current) {
+      startedAttemptRef.current = captureAttempt;
+      void openCaptureMedia();
+    }
+  }, [captureAttempt, phase]);
+
   function onLogout() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
-    void micRef.current?.stop();
+    stopCapture();
     logout();
     navigate("/student/login", { replace: true });
   }
 
   function goHome() {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    cameraStreamRef.current?.getTracks().forEach((t) => t.stop());
-    void micRef.current?.stop();
+    stopCapture();
     useStudentAttendanceStore.getState().reset();
     navigate("/student", { replace: true });
   }
@@ -345,6 +369,15 @@ export function StudentVerifyPage() {
               )}
               {micError && (
                 <p className="text-xs text-destructive">마이크: {micError}</p>
+              )}
+              {(cameraError || micError) && (
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={() => useStudentAttendanceStore.getState().restart()}
+                >
+                  <RefreshCw className="h-4 w-4" /> 권한 다시 요청
+                </Button>
               )}
               <p className="text-xs text-muted-foreground">
                 QR이 보이도록 카메라를 향하세요. 초음파는 마이크가 자동 수신합니다.

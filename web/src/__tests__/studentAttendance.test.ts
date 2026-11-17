@@ -143,6 +143,46 @@ describe("studentAttendance store", () => {
     verifySpy.mockRestore();
   });
 
+  it("automatically retries once after cross-verification rejection", async () => {
+    const rejected: VerifyResult = {
+      status: "rejected",
+      cross_verified: false,
+      device_matched: true,
+      reason: "cross_verify_failed",
+      check_phase: null,
+    };
+    const verified: VerifyResult = {
+      status: "verified",
+      cross_verified: true,
+      device_matched: true,
+      reason: null,
+      check_phase: "check_in",
+      check_in_done: true,
+      check_out_done: false,
+    };
+    const verifySpy = vi
+      .spyOn(apiClient, "verifyAttendance")
+      .mockResolvedValueOnce(rejected)
+      .mockResolvedValueOnce(verified);
+
+    useStudentAttendanceStore.getState().startCapture();
+    useStudentAttendanceStore.getState().setQr("s1|qr");
+    useStudentAttendanceStore.getState().setAudioNonce("stale");
+
+    await vi.waitFor(() => {
+      expect(useStudentAttendanceStore.getState().phase).toBe("capturing");
+      expect(verifySpy).toHaveBeenCalledTimes(1);
+    });
+
+    useStudentAttendanceStore.getState().setAudioNonce("fresh");
+    await vi.waitFor(() => {
+      expect(useStudentAttendanceStore.getState().phase).toBe("done");
+    });
+    expect(verifySpy).toHaveBeenCalledTimes(2);
+    expect(useStudentAttendanceStore.getState().result?.status).toBe("verified");
+    verifySpy.mockRestore();
+  });
+
   it("ignores setQr/setAudioNonce outside the capturing phase", () => {
     const verifySpy = vi
       .spyOn(apiClient, "verifyAttendance")

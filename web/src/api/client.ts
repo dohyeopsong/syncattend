@@ -73,6 +73,18 @@ export class ApiRequestError extends Error {
   }
 }
 
+function readableApiMessage(value: unknown, fallback: string): string {
+  if (typeof value === "string" && value.trim()) return value;
+  if (value && typeof value === "object") {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return fallback;
+    }
+  }
+  return fallback;
+}
+
 /** Tracks an in-flight refresh so concurrent 401s share a single renewal. */
 let refreshInFlight: Promise<string | null> | null = null;
 
@@ -124,7 +136,7 @@ async function request<T>(
     let code: string | undefined;
     try {
       const body = await res.json();
-      message = body.detail ?? message;
+      message = readableApiMessage(body.detail, message);
       code = body.code;
     } catch {
       // non-JSON error body; keep statusText

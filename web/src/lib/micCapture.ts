@@ -60,18 +60,23 @@ export class MicCaptureService {
    * MUST be called from a user gesture (button click) — Safari only grants mic
    * access + starts AudioContext inside a gesture handler.
    */
-  async start(onNonce: (nonce: string) => void): Promise<void> {
+  async start(
+    onNonce: (nonce: string) => void,
+    existingStream?: MediaStream,
+  ): Promise<void> {
     if (this.audioCtx) return; // already running
 
     // Request the mic. Safari prompts for permission on first call.
-    this.stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false, // ultrasonic band must NOT be filtered out
-        noiseSuppression: false,
-        autoGainControl: false,
-        channelCount: 1,
-      },
-    });
+    this.stream =
+      existingStream ??
+      (await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false, // ultrasonic band must NOT be filtered out
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      }));
 
     // Try 48 kHz (iOS hardware-native; matches the Flutter capture). If the
     // browser refuses, it falls back to its default (often 44100) — the decoder

@@ -5,6 +5,7 @@ import {
   refreshTokenApi,
   setAccessToken,
   setRefreshHandler,
+  ApiRequestError,
 } from "@/api/client";
 import type { Role } from "@/api/types";
 
@@ -62,7 +63,13 @@ async function _doLogin(
     });
     return true;
   } catch (e) {
-    set({ status: "error", error: e instanceof Error ? e.message : String(e) });
+    const message =
+      e instanceof ApiRequestError && e.status === 401
+        ? "아이디 또는 비밀번호가 올바르지 않습니다."
+        : e instanceof Error
+          ? e.message
+          : String(e);
+    set({ status: "error", error: message });
     return false;
   }
 }

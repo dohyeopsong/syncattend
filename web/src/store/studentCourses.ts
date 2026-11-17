@@ -41,7 +41,7 @@ interface StudentCoursesState {
   enrollingId: string | null;
 
   loadMyCourses: () => Promise<void>;
-  loadCatalog: () => Promise<void>;
+  loadCatalog: (query?: string) => Promise<void>;
   loadAttendance: () => Promise<void>;
   enroll: (courseId: string) => Promise<boolean>;
   unenroll: (courseId: string) => Promise<boolean>;
@@ -78,10 +78,10 @@ export const useStudentCoursesStore = create<StudentCoursesState>(
       }
     },
 
-    loadCatalog: async () => {
+    loadCatalog: async (query) => {
       set({ catalogStatus: "loading", catalogError: null });
       try {
-        const items = await apiListCatalog();
+        const items = await apiListCatalog(query);
         set({ catalog: items, catalogStatus: "idle" });
       } catch (e) {
         set({ catalogStatus: "error", catalogError: errMsg(e) });

@@ -393,6 +393,28 @@ describe("rejection reasons surface as errors", () => {
     expect(token.window_open).toBe(false);
     expect(token.window_remaining).toBe(0);
   });
+
+  it("shows a friendly message for invalid web login credentials", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ detail: { message: "invalid credentials" } }), {
+            status: 401,
+            headers: { "Content-Type": "application/json" },
+          }),
+      ),
+    );
+
+    const ok = await useAuthStore
+      .getState()
+      .login("prof@wku.ac.kr", "wrong-password");
+
+    expect(ok).toBe(false);
+    expect(useAuthStore.getState().error).toBe(
+      "아이디 또는 비밀번호가 올바르지 않습니다.",
+    );
+  });
 });
 
 describe("course management CRUD (web client + store)", () => {

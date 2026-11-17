@@ -29,6 +29,7 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
   const {
     catalog,
     catalogStatus,
+    catalogError,
     myCourses,
     enrollingId,
     loadCatalog,
@@ -42,9 +43,18 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
   const [clashCourse, setClashCourse] = useState<CourseCatalogItem | null>(null);
 
   useEffect(() => {
-    loadCatalog();
     loadMyCourses();
-  }, [loadCatalog, loadMyCourses]);
+  }, [loadMyCourses]);
+
+  // The backend returns a bounded recent slice for a blank query. Send the
+  // search term to the backend so students can find courses outside that
+  // initial slice, then keep the field-specific filter local.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      void loadCatalog(query);
+    }, query.trim() ? 250 : 0);
+    return () => clearTimeout(timer);
+  }, [loadCatalog, query]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -150,6 +160,22 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
               {[0, 1, 2, 3].map((i) => (
                 <Skeleton key={i} className="h-20 w-full rounded-xl" />
               ))}
+            </div>
+          ) : catalogStatus === "error" ? (
+            <div className="space-y-3 py-10 text-center">
+              <p className="text-sm text-destructive">
+                강좌 목록을 불러오지 못했습니다.
+              </p>
+              {catalogError && (
+                <p className="text-xs text-muted-foreground">{catalogError}</p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => void loadCatalog(query)}
+              >
+                다시 시도
+              </Button>
             </div>
           ) : filtered.length === 0 ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
