@@ -20,8 +20,7 @@ import {
 } from "@/lib/studentTimetable";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { EmptyState } from "@/components/ui/empty-state";
-import { Plus, RefreshCw, CalendarDays, AlertTriangle } from "lucide-react";
+import { Plus, RefreshCw, AlertTriangle } from "lucide-react";
 import { CourseCatalogSheet } from "./CourseCatalogSheet";
 import type { CourseScheduleSlot, MyCourseItem } from "@/api/types";
 
@@ -60,34 +59,6 @@ export function TimetablePage() {
     return (
       <div className="p-4">
         <Skeleton className="h-64 w-full rounded-2xl" />
-      </div>
-    );
-  }
-
-  if (myCourses.length === 0) {
-    return (
-      <div className="p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-lg font-semibold">내 시간표</h2>
-        </div>
-        <EmptyState
-          Icon={CalendarDays}
-          title="수강 중인 강의가 없습니다"
-          description="강좌 찾기에서 강의를 검색해 시간표에 추가해보세요."
-          action={
-            <button
-              type="button"
-              className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-haspopup="dialog"
-              onClick={() => setCatalogOpen(true)}
-            >
-              <Plus className="h-4 w-4" /> 강좌 찾기
-            </button>
-          }
-        />
-        {catalogOpen && (
-          <CourseCatalogSheet onClose={() => setCatalogOpen(false)} />
-        )}
       </div>
     );
   }

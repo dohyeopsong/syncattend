@@ -111,7 +111,7 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
       onClick={onClose}
     >
       <div
-        className="flex max-h-[min(760px,90vh)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-soft-lg"
+        className="flex h-[min(760px,90vh)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border bg-background shadow-soft-lg"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
