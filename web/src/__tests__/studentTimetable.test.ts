@@ -1,9 +1,13 @@
+// @vitest-environment jsdom
+
 // Tests for the ported student timetable utilities.
 //
 // Mirrors the Flutter Timetable helper behavior: overlap detection, weekly-grid
 // bounds, and client-side clash pre-check used by the 수강신청 catalog.
 
-import { describe, expect, it } from "vitest";
+import { createElement } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   conflictingCourses,
   flattenSchedules,
@@ -13,6 +17,8 @@ import {
   unscheduledCourses,
 } from "@/lib/studentTimetable";
 import type { CourseScheduleSlot, DayOfWeek, MyCourseItem } from "@/api/types";
+import { TimetablePage } from "@/pages/student/TimetablePage";
+import { useStudentCoursesStore } from "@/store/studentCourses";
 
 function slot(
   day: DayOfWeek,
@@ -142,5 +148,38 @@ describe("conflictingCourses", () => {
     });
     const candidate = { day_of_week: 0, start_period: 3, end_period: 4 };
     expect(conflictingCourses(candidate, [enrolled])).toHaveLength(0);
+  });
+});
+
+describe("TimetablePage empty state", () => {
+  beforeEach(() => {
+    useStudentCoursesStore.setState({
+      myCourses: [],
+      myCoursesStatus: "loading",
+      myCoursesError: null,
+      catalog: [],
+      catalogStatus: "idle",
+      catalogError: null,
+      enrollingId: null,
+      loadMyCourses: vi.fn(async () => {}),
+      loadCatalog: vi.fn(async () => {}),
+    });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows the timetable and opens course search while courses are loading", () => {
+    render(createElement(TimetablePage));
+
+    expect(screen.getByText("내 시간표")).toBeInTheDocument();
+    expect(screen.getByText("월")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "강좌 찾기" }));
+
+    expect(
+      screen.getByRole("dialog", { name: "강좌 찾기" }),
+    ).toBeInTheDocument();
   });
 });

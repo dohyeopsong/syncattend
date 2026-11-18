@@ -54,6 +54,14 @@ export function CourseCatalogSheet({ onClose }: { onClose: () => void }) {
     void loadCatalog();
   }, [loadCatalog]);
 
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape" && !clashCourse) onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [clashCourse, onClose]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return catalog;

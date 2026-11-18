@@ -19,13 +19,12 @@ import {
   unscheduledCourses,
 } from "@/lib/studentTimetable";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Plus, RefreshCw, AlertTriangle } from "lucide-react";
 import { CourseCatalogSheet } from "./CourseCatalogSheet";
 import type { CourseScheduleSlot, MyCourseItem } from "@/api/types";
 
 export function TimetablePage() {
-  const { myCourses, myCoursesStatus, loadMyCourses } = useStudentCoursesStore();
+  const { myCourses, loadMyCourses } = useStudentCoursesStore();
   const [catalogOpen, setCatalogOpen] = useState(false);
 
   useEffect(() => {
@@ -52,16 +51,7 @@ export function TimetablePage() {
     return ids;
   }, [slots]);
 
-  const loading = myCoursesStatus === "loading";
   const hasConflict = conflictSet.size > 0;
-
-  if (loading && myCourses.length === 0) {
-    return (
-      <div className="p-4">
-        <Skeleton className="h-64 w-full rounded-2xl" />
-      </div>
-    );
-  }
 
   return (
     <div className="p-4 pb-24">
